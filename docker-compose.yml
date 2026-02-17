@@ -1,7 +1,8 @@
 services:
   notebook-backend:
-    image: ${NOTEBOOK_BACKEND_IMAGE}
-    pull_policy: always
+    build:
+      context: ./services/notebook-backend
+      dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
       postgres:
