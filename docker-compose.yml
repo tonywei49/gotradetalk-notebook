@@ -1,0 +1,89 @@
+name: gotradetalk-company-private
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-hub}
+      POSTGRES_USER: ${POSTGRES_USER:-hub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hubpass}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - company_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hub} -d ${POSTGRES_DB:-hub}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - company_qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:6333/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - company_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  hub-backend:
+    build:
+      context: ../gotradetalk-client/hub-backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env.company-private
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${HUB_BACKEND_PORT:-4010}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hub}:${POSTGRES_PASSWORD:-hubpass}@postgres:5432/${POSTGRES_DB:-hub}
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "${HUB_BACKEND_PORT:-4010}:4010"
+
+  # 可選：公司節點也要一起跑 agent 時再啟用
+  # 不啟用時，直接忽略這個 service，不影響現有 agent 部署
+  gotradetalk-agent:
+    profiles: ["agent"]
+    build:
+      context: ../gotradetalk-agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.agent.company-private
+    volumes:
+      - company_agent_state:/app/data
+
+volumes:
+  company_pgdata:
+  company_qdrant_data:
+  company_redis_data:
+  company_agent_state:
