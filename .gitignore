@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.db.example
 !.env.company-private.example
 !.env.agent.company-private.example
 .DS_Store

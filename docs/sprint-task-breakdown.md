@@ -7,10 +7,10 @@
 
 ## 2. 任務清單（按模組）
 
-## 2.1 Backend（hub-backend）
+## 2.1 Backend（notebook-backend @ gotradetalk-notebook/services/notebook-backend）
 
 ### BE-01 資料表與 migration（Postgres）
-- [ ] 進度: 未開始
+- [x] 進度: 已完成（含 up/down migration 與驗證）
 - 內容:
   - 建立 `notebook_items`, `notebook_chunks`, `notebook_index_jobs`, `assist_logs`, `notebook_sync_ops`
   - 增加必要索引（company_id, owner_user_id, updated_at, status）
@@ -20,7 +20,7 @@
 - 對應 UAT: `UAT-01`, `UAT-03`, `UAT-11`, `UAT-12`, `UAT-15`
 
 ### BE-02 Notebook CRUD API
-- [ ] 進度: 未開始
+- [x] 進度: 已完成
 - 內容:
   - `GET/POST/PATCH/DELETE /notebook/items`
   - 權限檢查（NOTEBOOK_BASIC）
@@ -29,14 +29,14 @@
 - 對應 UAT: `UAT-01`, `UAT-02`, `UAT-13`
 
 ### BE-03 文件上傳後關聯與索引任務 API
-- [ ] 進度: 未開始
+- [x] 進度: 已完成
 - 內容:
   - `POST /notebook/items/:id/files`
   - 寫入 `index_status=pending` + 建立 `index_job`
 - 對應 UAT: `UAT-03`
 
 ### BE-04 文件解析 Pipeline（PDF/DOCX/CSV/XLSX）
-- [ ] 進度: 未開始
+- [x] 進度: 已完成
 - 內容:
   - PDF 文本抽取
   - DOCX 段落抽取
@@ -45,7 +45,7 @@
 - 對應 UAT: `UAT-03`, `UAT-04`, `UAT-10`
 
 ### BE-05 切塊、向量化、Qdrant upsert Worker
-- [ ] 進度: 未開始
+- [x] 進度: 已完成（含 Redis queue / poll worker）
 - 內容:
   - chunk + overlap
   - embedding 請求
@@ -54,7 +54,7 @@
 - 對應 UAT: `UAT-03`, `UAT-04`
 
 ### BE-06 混合檢索與 Rerank
-- [ ] 進度: 未開始
+- [x] 進度: 已完成
 - 內容:
   - vector + BM25 merge
   - rerank（可配置）
@@ -62,7 +62,7 @@
 - 對應 UAT: `UAT-05`, `UAT-06`, `UAT-08`
 
 ### BE-07 Assist API（含 5 句上下文）
-- [ ] 進度: 未開始
+- [x] 進度: 已完成
 - 內容:
   - `POST /chat/assist/query`
   - `POST /chat/assist/from-context`
@@ -70,7 +70,7 @@
 - 對應 UAT: `UAT-05`, `UAT-06`
 
 ### BE-08 反幻覺防護（服務端強制）
-- [ ] 進度: 未開始
+- [x] 進度: 已完成（服務端強制 prompt 注入）
 - 內容:
   - system prompt 防捏造規則
   - 無證據時拒答策略
@@ -78,14 +78,14 @@
 - 對應 UAT: `UAT-07`, `UAT-08`
 
 ### BE-09 Capability 與角色閘門
-- [ ] 進度: 未開始
+- [x] 進度: 已完成（assist 403 行為已實作）
 - 內容:
   - `GET /me/capabilities`
   - assist API 403 行為（FORBIDDEN_ROLE / CAPABILITY_DISABLED）
 - 對應 UAT: `UAT-02`, `UAT-14`
 
 ### BE-10 同步 API（離線回寫）
-- [ ] 進度: 未開始
+- [x] 進度: 已完成（client_op_id 幂等）
 - 內容:
   - `POST /notebook/sync/push`
   - `GET /notebook/sync/pull`
@@ -93,14 +93,14 @@
 - 對應 UAT: `UAT-09`, `UAT-10`, `UAT-11`, `UAT-12`
 
 ### BE-11 衝突處理策略
-- [ ] 進度: 未開始
+- [x] 進度: 已完成（revision/LWW/conflict copy）
 - 內容:
   - revision + updated_at
   - LWW + conflict 副本
 - 對應 UAT: `UAT-12`
 
 ### BE-12 審計與觀測
-- [ ] 進度: 未開始
+- [x] 進度: 已完成（assist logs / worker error logs）
 - 內容:
   - assist logs
   - 任務與錯誤日志

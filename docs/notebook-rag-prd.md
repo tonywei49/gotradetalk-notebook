@@ -1,11 +1,30 @@
 # GoTradeTalk Notebook + Knowledge Retrieval PRD (V1)
 
 ## 1. 文件資訊
-- 文件版本: v1.3
-- 日期: 2026-02-16
-- 範圍: `gotradetalk-ui` + `gotradetalk-client/hub-backend` + `gotradetalk-client/visitor`
+- 文件版本: v1.4
+- 日期: 2026-02-17
+- 範圍: `gotradetalk-ui` + `gotradetalk-notebook/services/notebook-backend` + `gotradetalk-client/visitor`
 - 定位: 單一 Notebook 核心能力 + 按角色開啟 LLM 增強能力
-- 部署模式: 去中心化（每公司私有部署）
+- 部署模式: 去中心化（每公司私有部署，client 視為一家公司）
+
+## 1.1 Repo Boundary / Code Location Rules
+- 本專案倉庫 `gotradetalk-notebook` 主要存放:
+  - PRD / 任務拆解 / 驗收文件
+  - 部署模板（`docker-compose*.yml`、`.env*.example`）
+- Notebook 核心後端程式碼:
+  - `gotradetalk-notebook/services/notebook-backend`
+- Notebook 後端實作（2.1）必須落在:
+  - `gotradetalk-notebook/services/notebook-backend`
+- `gotradetalk-client/hub-backend` 不承接 Notebook 核心後端邏輯，避免與 Hub/管理後台職責混用。
+- 管理後台與公司設定（2.2）必須落在:
+  - `gotradetalk-client/visitor`
+- 聊天端與 Notebook UI（2.3）必須落在:
+  - `gotradetalk-ui`
+- 離線同步與客戶端本地能力（2.4）必須落在:
+  - `gotradetalk-client/visitor`（若後續 App 端另立倉庫，需在該倉庫承接）
+- 執行規範:
+  - 每次提交需附「實際改動檔案清單」。
+  - 非本任務範圍檔案（如他人同步修改）不得一併提交。
 
 ## 2. 背景與目標
 
@@ -112,7 +131,7 @@
 - 內建本地 SQLite 快取（離線查看 + 離線編輯）
 - 本地同步隊列與衝突提示
 
-## 5.2 後端（hub-backend）
+## 5.2 後端（notebook-backend）
 1. Notebook CRUD API。
 2. 檔案關聯 API（保存 Matrix media metadata 與可抽取文本）。
 3. RAG API:
@@ -159,10 +178,11 @@
 - 公司私有服務（每家公司一套）:
   - `continuwuity`
   - `gotradetalk-agent`
-  - `hub-backend`
+  - `notebook-backend`
   - `Postgres`
   - `Qdrant`
   - `Redis`
+- `client` 端同樣視為一家公司，部署一套獨立 `notebook-backend + Postgres + Qdrant + Redis`。
 - 離線端存儲: 應用端/App 本地 SQLite
 - 對象/媒體: Matrix media（公司私有）
 - LLM/Embedding/Rerank: 由各公司後端代理調用（公司自有 key）
@@ -306,7 +326,7 @@
 - 安全閥:
   - 低信心禁止直接發送（可配置）
 
-## 7. API 草案（Hub）
+## 7. API 草案（Notebook Backend）
 
 ## 7.1 Notebook
 - `GET /notebook/items`
@@ -364,15 +384,15 @@
 - 角色與能力雙重校驗。
 
 ## 10. 部署模型（去中心化）
-- 每家公司獨立部署 stack:
+- 每家公司（含 client 作為獨立 company）各自獨立部署 stack:
   - `continuwuity`
   - `gotradetalk-agent`
-  - `hub-backend`
+  - `notebook-backend`
   - `postgres`
   - `qdrant`
   - `redis`
 - 前端按公司路由到對應公司私有 API。
-- 中央層（可選）僅做入口與路由，不落公司筆記內容。
+- 不存在跨公司共用 Notebook 資料層或共用向量庫。
 
 ## 11. 里程碑與排期建議
 
