@@ -1,0 +1,39 @@
+{
+  "name": "notebook-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "worker:notebook-index": "tsx src/workers/notebookIndexWorker.ts",
+    "worker:notebook-queue": "tsx src/workers/notebookQueueWorker.ts",
+    "test": "tsx --test src/**/*.test.ts",
+    "migrate:up": "tsx scripts/migrate.ts up",
+    "migrate:down": "tsx scripts/migrate.ts down",
+    "test:e2e:stack": "tsx scripts/notebook-stack-e2e.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "cors": "^2.8.5",
+    "csv-parse": "^6.1.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "ioredis": "^5.8.1",
+    "jsonwebtoken": "^9.0.2",
+    "mammoth": "^1.11.0",
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.16.3",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^20.14.9",
+    "@types/pg": "^8.16.0",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4"
+  }
+}

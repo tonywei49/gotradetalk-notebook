@@ -1,0 +1,14 @@
+services:
+  notebook-backend:
+    image: ${NOTEBOOK_BACKEND_IMAGE}
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      PORT: ${NOTEBOOK_BACKEND_PORT:-4010}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      QDRANT_URL: ${QDRANT_URL}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      QDRANT_VECTOR_SIZE: ${QDRANT_VECTOR_SIZE:-1536}
+    ports:
+      - "${NOTEBOOK_BACKEND_PORT:-4010}:4010"
