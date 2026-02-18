@@ -1,8 +1,7 @@
 services:
   notebook-backend:
-    build:
-      context: ./services/notebook-backend
-      dockerfile: Dockerfile
+    image: ghcr.io/tonywei49/notebook-backend:latest
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       postgres:
