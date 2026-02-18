@@ -4,7 +4,7 @@ ENV NODE_ENV=development
 COPY package*.json ./
 RUN NPM_CONFIG_PRODUCTION=false npm ci --no-audit --no-fund
 COPY . .
-RUN npm run build
+RUN node ./node_modules/typescript/bin/tsc -p tsconfig.json
 
 FROM node:20-alpine AS runtime
 WORKDIR /app
