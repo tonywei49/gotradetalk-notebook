@@ -1,30 +1,10 @@
 import { randomUUID } from 'crypto';
-import { supabaseAdmin } from '../supabase.js';
+import { createIndexJob, deleteChunksByItem, getIndexJobById, getNotebookItemByCompany, getNotebookItemTitles, listPendingIndexJobIds, markIndexJobFailed, markIndexJobRunning, markIndexJobSuccess, replaceItemChunks, searchChunksByQuery, upsertItemIndexState } from '../repos/notebookRepo.js';
 import { splitIntoChunks } from './notebookChunking.js';
 import { createEmbedding, getNotebookAiConfig, rerankCandidates } from './notebookLlm.js';
 import { parseDocument, fetchMatrixMediaBuffer } from './notebookParsing.js';
 import { deleteNotebookPointsByItem, ensureQdrantCollection, searchNotebookVectors, upsertNotebookPoints } from './notebookQdrant.js';
 import { enqueueNotebookJobId } from './notebookQueue.js';
-async function upsertChunksInPostgres(item, chunks, sourceType, sourceLocator) {
-    await supabaseAdmin.from('notebook_chunks').delete().eq('company_id', item.company_id).eq('item_id', item.id);
-    if (chunks.length === 0) {
-        return;
-    }
-    const payload = chunks.map((chunk) => ({
-        item_id: item.id,
-        company_id: item.company_id,
-        owner_user_id: item.owner_user_id,
-        chunk_index: chunk.chunkIndex,
-        chunk_text: chunk.text,
-        token_count: chunk.tokenCount,
-        content_hash: chunk.contentHash,
-        source_type: sourceType,
-        source_locator: sourceLocator
-    }));
-    const { error } = await supabaseAdmin.from('notebook_chunks').insert(payload);
-    if (error)
-        throw new Error(error.message);
-}
 async function extractItemText(item, matrixBaseUrl, accessToken) {
     if (item.item_type === 'text') {
         const text = `${item.title || ''}\n${item.content_markdown || ''}`.trim();
@@ -42,57 +22,40 @@ async function extractItemText(item, matrixBaseUrl, accessToken) {
     };
 }
 export async function enqueueNotebookIndexJob(params) {
-    const { data, error } = await supabaseAdmin
-        .from('notebook_index_jobs')
-        .insert({
-        company_id: params.companyId,
-        owner_user_id: params.ownerUserId,
-        item_id: params.itemId,
-        job_type: params.jobType,
-        status: 'pending'
-    })
-        .select('id')
-        .maybeSingle();
-    if (error)
-        throw new Error(error.message);
+    const data = await createIndexJob(params);
     if (data?.id) {
         await enqueueNotebookJobId(String(data.id));
     }
 }
 export async function runNotebookIndexJob(jobId, options) {
-    const { data: job, error: jobError } = await supabaseAdmin
-        .from('notebook_index_jobs')
-        .select('id, company_id, owner_user_id, item_id, job_type, status')
-        .eq('id', jobId)
-        .maybeSingle();
-    if (jobError || !job) {
+    const job = await getIndexJobById(jobId);
+    if (!job) {
         throw new Error('JOB_NOT_FOUND');
     }
-    await supabaseAdmin
-        .from('notebook_index_jobs')
-        .update({ status: 'running', started_at: new Date().toISOString(), error_message: null })
-        .eq('id', job.id);
+    await markIndexJobRunning(job.id);
     try {
-        const { data: item, error: itemError } = await supabaseAdmin
-            .from('notebook_items')
-            .select('id, company_id, owner_user_id, item_type, content_markdown, title, matrix_media_mxc, matrix_media_name, matrix_media_mime, is_indexable')
-            .eq('id', job.item_id)
-            .eq('company_id', job.company_id)
-            .maybeSingle();
-        if (itemError || !item) {
+        const item = await getNotebookItemByCompany(job.item_id, job.company_id);
+        if (!item) {
             throw new Error('ITEM_NOT_FOUND');
         }
         if (job.job_type === 'delete' || !item.is_indexable) {
             await deleteNotebookPointsByItem(job.company_id, item.id);
-            await supabaseAdmin.from('notebook_chunks').delete().eq('company_id', job.company_id).eq('item_id', item.id);
-            await supabaseAdmin.from('notebook_items').update({ index_status: 'skipped', index_error: null }).eq('id', item.id);
+            await deleteChunksByItem(job.company_id, item.id);
+            await upsertItemIndexState(item.id, 'skipped', null);
         }
         else {
             const extracted = await extractItemText(item, options?.matrixBaseUrl, options?.accessToken);
             const chunks = splitIntoChunks(extracted.text, Number(process.env.NOTEBOOK_CHUNK_SIZE || 1000), Number(process.env.NOTEBOOK_CHUNK_OVERLAP || 200));
             const aiConfig = await getNotebookAiConfig(job.company_id);
             await ensureQdrantCollection();
-            await upsertChunksInPostgres(item, chunks, extracted.sourceType, extracted.sourceLocator);
+            await replaceItemChunks({
+                itemId: item.id,
+                companyId: item.company_id,
+                ownerUserId: item.owner_user_id,
+                sourceType: extracted.sourceType,
+                sourceLocator: extracted.sourceLocator,
+                chunks
+            });
             const points = [];
             for (const chunk of chunks) {
                 const vector = await createEmbedding(aiConfig, chunk.text);
@@ -108,60 +71,42 @@ export async function runNotebookIndexJob(jobId, options) {
                         content_hash: chunk.contentHash,
                         source_type: extracted.sourceType,
                         source_locator: extracted.sourceLocator,
+                        text: chunk.text,
                         updated_at: new Date().toISOString()
                     }
                 });
             }
             await deleteNotebookPointsByItem(item.company_id, item.id);
             await upsertNotebookPoints(points);
-            await supabaseAdmin.from('notebook_items').update({ index_status: 'success', index_error: null }).eq('id', item.id);
+            await upsertItemIndexState(item.id, 'success', null);
         }
-        await supabaseAdmin
-            .from('notebook_index_jobs')
-            .update({ status: 'success', finished_at: new Date().toISOString() })
-            .eq('id', job.id);
+        await markIndexJobSuccess(job.id);
     }
     catch (error) {
         const message = error?.message || 'INDEX_FAILED';
-        await supabaseAdmin
-            .from('notebook_index_jobs')
-            .update({ status: 'failed', finished_at: new Date().toISOString(), error_message: message })
-            .eq('id', job.id);
-        await supabaseAdmin
-            .from('notebook_items')
-            .update({ index_status: 'failed', index_error: message })
-            .eq('id', job.item_id);
+        await markIndexJobFailed(job.id, message);
+        await upsertItemIndexState(job.item_id, 'failed', message);
         throw error;
     }
 }
 export async function pollAndRunNotebookIndexJobs(limit = 5, options) {
-    const { data: jobs, error } = await supabaseAdmin
-        .from('notebook_index_jobs')
-        .select('id')
-        .eq('status', 'pending')
-        .order('created_at', { ascending: true })
-        .limit(limit);
-    if (error)
-        throw new Error(error.message);
-    for (const job of jobs || []) {
-        await runNotebookIndexJob(String(job.id), options);
+    const jobIds = await listPendingIndexJobIds(limit);
+    for (const jobId of jobIds) {
+        await runNotebookIndexJob(String(jobId), options);
     }
-    return (jobs || []).length;
+    return jobIds.length;
 }
 export async function hybridSearchNotebook(params) {
     const aiConfig = await getNotebookAiConfig(params.companyId);
     const topK = Math.max(1, params.topK);
     const vector = await createEmbedding(aiConfig, params.query);
     const vectorHits = await searchNotebookVectors(params.companyId, params.ownerUserId, vector, topK * 2);
-    const { data: bmRows, error: bmError } = await supabaseAdmin
-        .from('notebook_chunks')
-        .select('item_id, chunk_text, source_locator')
-        .eq('company_id', params.companyId)
-        .eq('owner_user_id', params.ownerUserId)
-        .ilike('chunk_text', `%${params.query.slice(0, 64)}%`)
-        .limit(topK * 2);
-    if (bmError)
-        throw new Error(bmError.message);
+    const bmRows = await searchChunksByQuery({
+        companyId: params.companyId,
+        ownerUserId: params.ownerUserId,
+        query: params.query,
+        limit: topK * 2
+    });
     const merged = new Map();
     for (const hit of vectorHits) {
         const payload = hit.payload || {};
@@ -189,13 +134,7 @@ export async function hybridSearchNotebook(params) {
     }
     const candidates = Array.from(merged.values());
     const ranked = await rerankCandidates(aiConfig, params.query, candidates.map((c) => ({ text: c.snippet, score: c.score })));
-    const { data: items } = await supabaseAdmin
-        .from('notebook_items')
-        .select('id, title')
-        .eq('company_id', params.companyId)
-        .eq('owner_user_id', params.ownerUserId)
-        .in('id', candidates.map((c) => c.item_id));
-    const titleMap = new Map((items || []).map((item) => [item.id, item.title]));
+    const titleMap = await getNotebookItemTitles(params.companyId, params.ownerUserId, Array.from(new Set(candidates.map((c) => c.item_id))));
     return ranked.slice(0, topK).map((row) => {
         const candidate = candidates[row.index];
         return {

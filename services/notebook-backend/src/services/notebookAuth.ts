@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express'
-import { supabaseAdmin } from '../supabase.js'
 import type { RequestUser } from '../types.js'
+import { getCompanySettings, getProfileById } from '../repos/authRepo.js'
 
 export const NOTEBOOK_BASIC_CAPABILITY = 'NOTEBOOK_BASIC'
 export const NOTEBOOK_LLM_ASSIST_CAPABILITY = 'NOTEBOOK_LLM_ASSIST'
@@ -43,13 +43,8 @@ export async function resolveNotebookAccessContext(req: Request): Promise<Notebo
     return null
   }
 
-  const { data: profile, error: profileError } = await supabaseAdmin
-    .from('profiles')
-    .select('id, company_id, user_type')
-    .eq('id', user.id)
-    .maybeSingle()
-
-  if (profileError || !profile) {
+  const profile = await getProfileById(user.id)
+  if (!profile) {
     return null
   }
 
@@ -59,12 +54,7 @@ export async function resolveNotebookAccessContext(req: Request): Promise<Notebo
   }
 
   const role = toRole(profile.user_type || user.userType, user.isEmployee)
-
-  const { data: settings } = await supabaseAdmin
-    .from('company_settings')
-    .select('notebook_ai_enabled, notebook_ai_allow_low_confidence_send, notebook_ai_retrieval_top_k, notebook_ai_score_threshold, notebook_ai_max_context_tokens, notebook_ai_ocr_enabled')
-    .eq('company_id', companyId)
-    .maybeSingle()
+  const settings = await getCompanySettings(companyId)
 
   const policy = {
     notebook_ai_enabled: Boolean(settings?.notebook_ai_enabled),

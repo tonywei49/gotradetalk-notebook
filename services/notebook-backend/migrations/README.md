@@ -1,6 +1,7 @@
 # Migrations Order
 
 This service supports empty Postgres bootstrap.
+Baseline migration is idempotent and can run on partially initialized DBs (uses `IF NOT EXISTS` and additive `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`).
 
 Apply order (`up`):
 1. `000_notebook_baseline.up.sql`

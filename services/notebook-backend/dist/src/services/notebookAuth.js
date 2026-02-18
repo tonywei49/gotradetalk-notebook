@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '../supabase.js';
+import { getCompanySettings, getProfileById } from '../repos/authRepo.js';
 export const NOTEBOOK_BASIC_CAPABILITY = 'NOTEBOOK_BASIC';
 export const NOTEBOOK_LLM_ASSIST_CAPABILITY = 'NOTEBOOK_LLM_ASSIST';
 export const NOTEBOOK_RAG_ADMIN_CAPABILITY = 'NOTEBOOK_RAG_ADMIN';
@@ -20,12 +20,8 @@ export async function resolveNotebookAccessContext(req) {
     if (!user?.id) {
         return null;
     }
-    const { data: profile, error: profileError } = await supabaseAdmin
-        .from('profiles')
-        .select('id, company_id, user_type')
-        .eq('id', user.id)
-        .maybeSingle();
-    if (profileError || !profile) {
+    const profile = await getProfileById(user.id);
+    if (!profile) {
         return null;
     }
     const companyId = String(profile.company_id || user.memberships?.[0]?.company_id || '').trim();
@@ -33,11 +29,7 @@ export async function resolveNotebookAccessContext(req) {
         return null;
     }
     const role = toRole(profile.user_type || user.userType, user.isEmployee);
-    const { data: settings } = await supabaseAdmin
-        .from('company_settings')
-        .select('notebook_ai_enabled, notebook_ai_allow_low_confidence_send, notebook_ai_retrieval_top_k, notebook_ai_score_threshold, notebook_ai_max_context_tokens, notebook_ai_ocr_enabled')
-        .eq('company_id', companyId)
-        .maybeSingle();
+    const settings = await getCompanySettings(companyId);
     const policy = {
         notebook_ai_enabled: Boolean(settings?.notebook_ai_enabled),
         allow_low_confidence_send: Boolean(settings?.notebook_ai_allow_low_confidence_send),

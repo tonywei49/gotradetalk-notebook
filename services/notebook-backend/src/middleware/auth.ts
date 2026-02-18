@@ -1,6 +1,13 @@
 import type { Request, Response, NextFunction } from 'express'
-import { supabaseAdmin } from '../supabase.js'
+import { isSupabaseAuthConfigured, supabaseAdmin } from '../supabase.js'
 import type { RequestUser } from '../types.js'
+import {
+  getCompanyByHsDomain,
+  getProfileByAuthUserIdOrId,
+  getProfileByMatrixUserId,
+  getStaffProfileByLocalId,
+  listMembershipsByUserId
+} from '../repos/authRepo.js'
 
 function getBearerToken(req: Request) {
   const authHeader = String(req.headers.authorization || '')
@@ -41,6 +48,13 @@ async function fetchMatrixWhoami(matrixBaseUrl: string, accessToken: string) {
   return response.json() as Promise<{ user_id: string }>
 }
 
+function authNotConfigured(res: Response) {
+  return res.status(503).json({
+    code: 'AUTH_NOT_CONFIGURED',
+    message: 'Supabase auth env missing: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY'
+  })
+}
+
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = getBearerToken(req)
 
@@ -48,27 +62,25 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return res.status(401).json({ message: 'Missing auth token' })
   }
 
+  if (!isSupabaseAuthConfigured || !supabaseAdmin) {
+    return authNotConfigured(res)
+  }
+
   const { data, error } = await supabaseAdmin.auth.getUser(token)
   if (error || !data.user) {
     return res.status(401).json({ message: 'Invalid auth token' })
   }
 
-  const userId = data.user.id
-  const { data: memberships, error: membershipError } = await supabaseAdmin
-    .from('company_memberships')
-    .select('company_id, role')
-    .eq('user_id', userId)
+  const profile = await getProfileByAuthUserIdOrId(data.user.id)
+  const resolvedUserId = profile?.id || data.user.id
+  const memberships = await listMembershipsByUserId(resolvedUserId)
 
-  if (membershipError) {
-    return res.status(500).json({ message: membershipError.message })
-  }
-
-  const mappedMemberships = memberships || []
   const requestUser: RequestUser = {
-    id: userId,
+    id: resolvedUserId,
     email: data.user.email ?? undefined,
-    isEmployee: mappedMemberships.length > 0,
-    memberships: mappedMemberships
+    userType: profile?.user_type,
+    isEmployee: memberships.length > 0 || profile?.user_type === 'staff',
+    memberships
   }
 
   ;(req as any).user = requestUser
@@ -83,49 +95,38 @@ export async function requireHubUser(req: Request, res: Response, next: NextFunc
 
   const matrixUserId = String(req.query.matrix_user_id || req.headers['x-matrix-user-id'] || '').trim()
   if (matrixUserId) {
-    const { data: profile, error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .select('id, user_type')
-      .eq('matrix_user_id', matrixUserId)
-      .maybeSingle()
-
-    if (!profileError && profile) {
+    const profile = await getProfileByMatrixUserId(matrixUserId)
+    if (profile) {
+      const memberships = await listMembershipsByUserId(profile.id)
       const requestUser: RequestUser = {
         id: profile.id,
         userType: profile.user_type,
-        isEmployee: profile.user_type === 'staff',
-        memberships: []
+        isEmployee: memberships.length > 0 || profile.user_type === 'staff',
+        memberships
       }
       ;(req as any).user = requestUser
       return next()
     }
   }
 
-  const { data, error } = await supabaseAdmin.auth.getUser(token)
-  if (!error && data.user) {
-    const userId = data.user.id
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('id, user_type')
-      .or(`auth_user_id.eq.${userId},id.eq.${userId}`)
-      .maybeSingle()
+  if (isSupabaseAuthConfigured && supabaseAdmin) {
+    const { data, error } = await supabaseAdmin.auth.getUser(token)
+    if (!error && data.user) {
+      const profile = await getProfileByAuthUserIdOrId(data.user.id)
+      const resolvedUserId = profile?.id || data.user.id
+      const memberships = await listMembershipsByUserId(resolvedUserId)
 
-    const { data: memberships } = await supabaseAdmin
-      .from('company_memberships')
-      .select('company_id, role')
-      .eq('user_id', userId)
+      const requestUser: RequestUser = {
+        id: resolvedUserId,
+        email: data.user.email ?? undefined,
+        userType: profile?.user_type,
+        isEmployee: memberships.length > 0 || profile?.user_type === 'staff',
+        memberships
+      }
 
-    const mappedMemberships = memberships || []
-    const requestUser: RequestUser = {
-      id: profile?.id || userId,
-      email: data.user.email ?? undefined,
-      userType: profile?.user_type,
-      isEmployee: mappedMemberships.length > 0 || profile?.user_type === 'staff',
-      memberships: mappedMemberships
+      ;(req as any).user = requestUser
+      return next()
     }
-
-    ;(req as any).user = requestUser
-    return next()
   }
 
   try {
@@ -133,74 +134,42 @@ export async function requireHubUser(req: Request, res: Response, next: NextFunc
     if (!hsUrl) {
       return res.status(400).json({ message: 'Missing hs_url' })
     }
-    const matrixUserId = String(req.query.matrix_user_id || req.headers['x-matrix-user-id'] || '').trim()
-    if (matrixUserId) {
-      const { data: profile, error: profileError } = await supabaseAdmin
-        .from('profiles')
-        .select('id, user_type')
-        .eq('matrix_user_id', matrixUserId)
-        .maybeSingle()
 
-      if (!profileError && profile) {
-        const requestUser: RequestUser = {
-          id: profile.id,
-          userType: profile.user_type,
-          isEmployee: profile.user_type === 'staff',
-          memberships: []
-        }
-        ;(req as any).user = requestUser
-        return next()
-      }
-    }
     const whoami = await fetchMatrixWhoami(normalizeBaseUrl(hsUrl), token)
-    const { data: profile, error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .select('id, user_type')
-      .eq('matrix_user_id', whoami.user_id)
-      .maybeSingle()
+    const profile = await getProfileByMatrixUserId(whoami.user_id)
 
-    if (profileError || !profile) {
+    if (!profile) {
       return res.status(404).json({ message: 'Profile not found' })
     }
 
+    const memberships = await listMembershipsByUserId(profile.id)
     const requestUser: RequestUser = {
       id: profile.id,
       userType: profile.user_type,
-      isEmployee: profile.user_type === 'staff',
-      memberships: []
+      isEmployee: memberships.length > 0 || profile.user_type === 'staff',
+      memberships
     }
 
     ;(req as any).user = requestUser
     return next()
   } catch (matrixError) {
-    const matrixUserId = String(req.query.matrix_user_id || req.headers['x-matrix-user-id'] || '').trim()
     if (matrixUserId) {
       const localPart = matrixUserId.startsWith('@') ? matrixUserId.slice(1).split(':')[0] : ''
       const hsUrl = String(req.query.hs_url || req.headers['x-hs-url'] || '').trim()
       const host = hsUrl ? new URL(normalizeBaseUrl(hsUrl)).host : ''
 
       if (localPart && host) {
-        const { data: company } = await supabaseAdmin
-          .from('companies')
-          .select('id')
-          .eq('hs_domain', host)
-          .maybeSingle()
-
+        const company = await getCompanyByHsDomain(host)
         if (company?.id) {
-          const { data: fallbackProfile, error: fallbackError } = await supabaseAdmin
-            .from('profiles')
-            .select('id, user_type')
-            .eq('user_local_id', localPart)
-            .eq('company_id', company.id)
-            .eq('user_type', 'staff')
-            .maybeSingle()
+          const fallbackProfile = await getStaffProfileByLocalId(company.id, localPart)
 
-          if (!fallbackError && fallbackProfile) {
+          if (fallbackProfile) {
+            const memberships = await listMembershipsByUserId(fallbackProfile.id)
             const requestUser: RequestUser = {
               id: fallbackProfile.id,
               userType: fallbackProfile.user_type,
               isEmployee: true,
-              memberships: []
+              memberships
             }
             ;(req as any).user = requestUser
             return next()

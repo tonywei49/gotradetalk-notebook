@@ -1,16 +1,9 @@
-import { supabaseAdmin } from '../supabase.js';
+import { getCompanySettings } from '../repos/authRepo.js';
 function normalizeBaseUrl(value) {
     return value.endsWith('/') ? value.slice(0, -1) : value;
 }
 export async function getNotebookAiConfig(companyId) {
-    const { data, error } = await supabaseAdmin
-        .from('company_settings')
-        .select('notebook_ai_enabled, notebook_ai_llm_base_url, notebook_ai_llm_api_key, notebook_ai_chat_model, notebook_ai_embedding_model, notebook_ai_rerank_model, notebook_ai_retrieval_top_k, notebook_ai_score_threshold, notebook_ai_max_context_tokens, notebook_ai_allow_low_confidence_send')
-        .eq('company_id', companyId)
-        .maybeSingle();
-    if (error) {
-        throw new Error(error.message);
-    }
+    const data = await getCompanySettings(companyId);
     return {
         enabled: Boolean(data?.notebook_ai_enabled),
         baseUrl: normalizeBaseUrl(String(data?.notebook_ai_llm_base_url || '')),

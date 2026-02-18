@@ -38,6 +38,15 @@ Then set backend env to DB endpoints:
 - `QDRANT_URL=http://<qdrant-host>:6333`
 - `QDRANT_API_KEY=<qdrant-api-key>`
 
+Auth env (Supabase auth only):
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_ANON_KEY` (optional)
+
+Data-path rule:
+- Notebook business tables (`notebook_*`, `assist_logs`, `company_settings`, `profiles`, `company_memberships`) are read/written only through `DATABASE_URL` Postgres.
+- Supabase is only used for token validation (`auth.getUser`), not for business table CRUD.
+
 ## Coolify note
 - Prefer image pull deployment for `notebook-backend` to avoid server-side build failures.
 - Database services do not require public domains.
@@ -55,3 +64,8 @@ Then set backend env to DB endpoints:
     - `company_memberships`
 - Container startup flow:
   - `node dist/scripts/migrate.js up && node dist/src/index.js`
+
+## Auth fallback behavior
+- If `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are missing, service still boots.
+- `/health` remains available.
+- Auth-required routes return `503 AUTH_NOT_CONFIGURED` when they require Supabase token validation path.
