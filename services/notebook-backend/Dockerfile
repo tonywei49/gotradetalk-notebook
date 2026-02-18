@@ -1,11 +1,8 @@
-FROM node:20-alpine AS deps
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --include=dev --no-audit --no-fund
-
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+ENV NODE_ENV=development
+COPY package*.json ./
+RUN NPM_CONFIG_PRODUCTION=false npm ci --include=dev --no-audit --no-fund
 COPY . .
 RUN npm run build
 
