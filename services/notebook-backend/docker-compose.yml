@@ -12,6 +12,8 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+    command: >
+      sh -c "node dist/scripts/migrate.js up && node dist/src/index.js"
     ports:
       - "${NOTEBOOK_BACKEND_PORT:-4010}:4010"
 

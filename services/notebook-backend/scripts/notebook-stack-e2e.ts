@@ -1,5 +1,4 @@
 import 'dotenv/config'
-import fs from 'fs'
 import path from 'path'
 import pg from 'pg'
 import Redis from 'ioredis'
@@ -15,74 +14,42 @@ async function assertTableExists(client: any, table: string) {
   }
 }
 
-async function runSql(client: any, file: string) {
-  const sql = fs.readFileSync(file, 'utf8')
-  await client.query('BEGIN')
-  try {
-    await client.query(sql)
-    await client.query('COMMIT')
-  } catch (error) {
-    await client.query('ROLLBACK')
-    throw error
-  }
-}
-
-async function ensureBaseSchema(client: any) {
-  await client.query('CREATE EXTENSION IF NOT EXISTS pgcrypto;')
-  await client.query(`
-    CREATE OR REPLACE FUNCTION public.set_updated_at()
-    RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-    BEGIN
-      NEW.updated_at = now();
-      RETURN NEW;
-    END;
-    $$;
-  `)
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS public.companies (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      name text,
-      created_at timestamptz DEFAULT now(),
-      updated_at timestamptz DEFAULT now()
-    );
-  `)
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS public.profiles (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      company_id uuid REFERENCES public.companies(id),
-      user_type text,
-      created_at timestamptz DEFAULT now(),
-      updated_at timestamptz DEFAULT now()
-    );
-  `)
-}
-
 async function verifyMigrations(databaseUrl: string) {
   const { Client } = pg as any
   const client = new Client({ connectionString: databaseUrl })
   await client.connect()
 
-  const up = path.join(process.cwd(), 'migrations', '016_notebook_rag_core.up.sql')
-  const down = path.join(process.cwd(), 'migrations', '016_notebook_rag_core.down.sql')
+  const { spawnSync } = await import('node:child_process')
+  const runMigrate = (action: 'up' | 'down') => {
+    const bin = process.platform === 'win32' ? 'node.exe' : 'node'
+    const script = path.join(process.cwd(), 'dist', 'scripts', 'migrate.js')
+    const result = spawnSync(bin, [script, action], {
+      env: { ...process.env, DATABASE_URL: databaseUrl },
+      encoding: 'utf8'
+    })
+    if (result.status !== 0) {
+      throw new Error(`migrate ${action} failed: ${result.stderr || result.stdout}`)
+    }
+  }
 
-  await ensureBaseSchema(client)
-  await runSql(client, down).catch(() => undefined)
-  await runSql(client, up)
+  runMigrate('down')
+  runMigrate('up')
   await assertTableExists(client, 'notebook_items')
   await assertTableExists(client, 'notebook_chunks')
   await assertTableExists(client, 'notebook_index_jobs')
   await assertTableExists(client, 'assist_logs')
   await assertTableExists(client, 'notebook_sync_ops')
+  await assertTableExists(client, 'companies')
+  await assertTableExists(client, 'profiles')
+  await assertTableExists(client, 'company_settings')
 
-  await runSql(client, down)
+  runMigrate('down')
   const dropped = await client.query(`select to_regclass('public.notebook_items') as exists_name`)
   if (dropped.rows[0]?.exists_name) {
     throw new Error('Rollback failed: notebook_items still exists')
   }
 
-  await runSql(client, up)
+  runMigrate('up')
   await assertTableExists(client, 'notebook_items')
 
   await client.end()

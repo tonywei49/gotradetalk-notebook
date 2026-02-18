@@ -41,3 +41,17 @@ Then set backend env to DB endpoints:
 ## Coolify note
 - Prefer image pull deployment for `notebook-backend` to avoid server-side build failures.
 - Database services do not require public domains.
+
+## Standalone DB Bootstrap (Empty Postgres)
+- `notebook-backend` supports empty Postgres bootstrap using:
+  - `000_notebook_baseline.up.sql`
+  - `016_notebook_rag_core.up.sql`
+- FK strategy:
+  - Keep FK integrity in notebook core tables.
+  - Provide local minimal dependency tables in baseline migration:
+    - `companies`
+    - `profiles`
+    - `company_settings`
+    - `company_memberships`
+- Container startup flow:
+  - `node dist/scripts/migrate.js up && node dist/src/index.js`
