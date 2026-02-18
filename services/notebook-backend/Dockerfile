@@ -3,6 +3,7 @@ WORKDIR /app
 ENV NODE_ENV=development
 COPY package*.json ./
 RUN NPM_CONFIG_PRODUCTION=false npm ci --include=dev --no-audit --no-fund
+RUN npm install --no-save typescript
 COPY . .
 RUN npm run build
 
