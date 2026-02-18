@@ -2,8 +2,7 @@ FROM node:20-alpine AS build
 WORKDIR /app
 ENV NODE_ENV=development
 COPY package*.json ./
-RUN NPM_CONFIG_PRODUCTION=false npm ci --include=dev --no-audit --no-fund
-RUN npm install --no-save typescript
+RUN NPM_CONFIG_PRODUCTION=false npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
 
