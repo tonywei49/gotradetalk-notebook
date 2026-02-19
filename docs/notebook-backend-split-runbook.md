@@ -18,6 +18,10 @@ npm run worker:notebook-queue
 # or fallback:
 npm run worker:notebook-index
 ```
+For file-item indexing (`mxc://...`), worker env must include:
+- `NOTEBOOK_INDEX_MATRIX_HS_URL`
+- `NOTEBOOK_INDEX_MATRIX_ACCESS_TOKEN`
+If omitted, file jobs fail with `INVALID_CONTEXT` (text jobs still process normally).
 
 ## Smoke
 ```bash

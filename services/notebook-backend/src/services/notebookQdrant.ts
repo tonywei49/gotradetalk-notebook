@@ -20,6 +20,10 @@ function buildHeaders(apiKey: string) {
   return headers
 }
 
+function isCollectionMissing(status: number, text: string) {
+  return status === 404 && /not\s+exist|not\s+found|doesn't exist|does not exist/i.test(text)
+}
+
 export async function ensureQdrantCollection() {
   const { baseUrl, apiKey, collection, vectorSize } = getQdrantConfig()
   if (!baseUrl) return
@@ -77,6 +81,9 @@ export async function deleteNotebookPointsByItem(companyId: string, itemId: stri
 
   if (!resp.ok) {
     const text = await resp.text()
+    if (isCollectionMissing(resp.status, text)) {
+      return
+    }
     throw new Error(`QDRANT_DELETE_FAILED: ${resp.status} ${text}`)
   }
 }

@@ -12,6 +12,9 @@ function buildHeaders(apiKey) {
     }
     return headers;
 }
+function isCollectionMissing(status, text) {
+    return status === 404 && /not\s+exist|not\s+found|doesn't exist|does not exist/i.test(text);
+}
 export async function ensureQdrantCollection() {
     const { baseUrl, apiKey, collection, vectorSize } = getQdrantConfig();
     if (!baseUrl)
@@ -65,6 +68,9 @@ export async function deleteNotebookPointsByItem(companyId, itemId) {
     });
     if (!resp.ok) {
         const text = await resp.text();
+        if (isCollectionMissing(resp.status, text)) {
+            return;
+        }
         throw new Error(`QDRANT_DELETE_FAILED: ${resp.status} ${text}`);
     }
 }

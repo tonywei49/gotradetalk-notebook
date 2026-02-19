@@ -94,7 +94,15 @@ export async function runNotebookIndexJob(jobId, options) {
 export async function pollAndRunNotebookIndexJobs(limit = 5, options) {
     const jobIds = await listPendingIndexJobIds(limit);
     for (const jobId of jobIds) {
-        await runNotebookIndexJob(String(jobId), options);
+        try {
+            await runNotebookIndexJob(String(jobId), options);
+        }
+        catch (error) {
+            console.error('[notebook-indexing] job failed', {
+                jobId: String(jobId),
+                error: error?.message || String(error)
+            });
+        }
     }
     return jobIds.length;
 }

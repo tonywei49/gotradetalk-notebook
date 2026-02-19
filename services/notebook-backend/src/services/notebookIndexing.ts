@@ -141,7 +141,14 @@ export async function pollAndRunNotebookIndexJobs(limit = 5, options?: { matrixB
   const jobIds = await listPendingIndexJobIds(limit)
 
   for (const jobId of jobIds) {
-    await runNotebookIndexJob(String(jobId), options)
+    try {
+      await runNotebookIndexJob(String(jobId), options)
+    } catch (error: any) {
+      console.error('[notebook-indexing] job failed', {
+        jobId: String(jobId),
+        error: error?.message || String(error)
+      })
+    }
   }
 
   return jobIds.length
