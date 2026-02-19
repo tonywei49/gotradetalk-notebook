@@ -201,7 +201,7 @@
 ## 2.2 Admin/Company Console（gotradetalk-client/visitor）
 
 ### AD-01 Notebook AI 設定頁
-- [ ] 進度: 未開始
+- [x] 進度: 已完成（含 capability/permission 驅動顯示）
 - 內容:
   - chat/embedding/rerank model
   - base URL / API key
@@ -209,14 +209,14 @@
 - 對應 UAT: `UAT-14`
 
 ### AD-02 OCR 與策略開關
-- [ ] 進度: 未開始
+- [x] 進度: 已完成
 - 內容:
   - 是否允許 OCR
   - 是否允許低信心直發
 - 對應 UAT: `UAT-08`, `UAT-14`
 
 ### AD-03 設定測試工具
-- [ ] 進度: 未開始
+- [x] 進度: 已完成（embedding/retrieval/response）
 - 內容:
   - embedding test
   - retrieval test
