@@ -17,6 +17,36 @@ services:
     ports:
       - "${NOTEBOOK_BACKEND_PORT:-4010}:4010"
 
+  notebook-queue-worker:
+    image: ghcr.io/tonywei49/notebook-backend:latest
+    pull_policy: always
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    command: ["node", "dist/src/workers/notebookQueueWorker.js"]
+
+  notebook-index-worker:
+    image: ghcr.io/tonywei49/notebook-backend:latest
+    pull_policy: always
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    command: ["node", "dist/src/workers/notebookIndexWorker.js"]
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped

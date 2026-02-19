@@ -20,6 +20,56 @@ services:
     ports:
       - "${NOTEBOOK_BACKEND_PORT:-4010}:4010"
 
+  notebook-queue-worker:
+    image: ghcr.io/tonywei49/notebook-backend:latest
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    command: ["node", "dist/src/workers/notebookQueueWorker.js"]
+    environment:
+      PORT: ${NOTEBOOK_BACKEND_PORT:-4010}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      QDRANT_VECTOR_SIZE: ${QDRANT_VECTOR_SIZE:-1536}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      NOTEBOOK_INDEX_MATRIX_HS_URL: ${NOTEBOOK_INDEX_MATRIX_HS_URL}
+      NOTEBOOK_INDEX_MATRIX_ACCESS_TOKEN: ${NOTEBOOK_INDEX_MATRIX_ACCESS_TOKEN}
+
+  notebook-index-worker:
+    image: ghcr.io/tonywei49/notebook-backend:latest
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    command: ["node", "dist/src/workers/notebookIndexWorker.js"]
+    environment:
+      PORT: ${NOTEBOOK_BACKEND_PORT:-4010}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      QDRANT_VECTOR_SIZE: ${QDRANT_VECTOR_SIZE:-1536}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      NOTEBOOK_INDEX_MATRIX_HS_URL: ${NOTEBOOK_INDEX_MATRIX_HS_URL}
+      NOTEBOOK_INDEX_MATRIX_ACCESS_TOKEN: ${NOTEBOOK_INDEX_MATRIX_ACCESS_TOKEN}
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
