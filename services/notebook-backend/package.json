@@ -12,7 +12,9 @@
     "test": "tsx --test src/**/*.test.ts",
     "migrate:up": "tsx scripts/migrate.ts up",
     "migrate:down": "tsx scripts/migrate.ts down",
-    "test:e2e:stack": "tsx scripts/notebook-stack-e2e.ts"
+    "test:e2e:stack": "tsx scripts/notebook-stack-e2e.ts",
+    "test:rag": "tsx scripts/rag-eval.ts",
+    "test:rag:compare": "tsx scripts/rag-eval-compare.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",

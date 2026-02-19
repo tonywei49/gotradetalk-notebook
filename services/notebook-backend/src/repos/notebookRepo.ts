@@ -408,16 +408,54 @@ export async function searchChunksByQuery(params: {
   ownerUserId: string
   query: string
   limit: number
-}): Promise<Array<{ item_id: string; chunk_text: string; source_locator: string | null }>> {
-  const result = await dbQuery<{ item_id: string; chunk_text: string; source_locator: string | null }>(
-    `select item_id::text as item_id, chunk_text, source_locator
+}): Promise<Array<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number }>> {
+  const ftsResult = await dbQuery<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number }>(
+    `select
+      item_id::text as item_id,
+      chunk_index,
+      chunk_text,
+      source_locator,
+      ts_rank_cd(to_tsvector('simple', chunk_text), websearch_to_tsquery('simple', $3)) as score
+     from public.notebook_chunks
+     where company_id = $1
+       and owner_user_id = $2
+       and to_tsvector('simple', chunk_text) @@ websearch_to_tsquery('simple', $3)
+     order by score desc
+     limit $4`,
+    [params.companyId, params.ownerUserId, params.query, params.limit]
+  ).catch(async () => {
+    return dbQuery<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number }>(
+      `select
+        item_id::text as item_id,
+        chunk_index,
+        chunk_text,
+        source_locator,
+        0.1::float8 as score
+       from public.notebook_chunks
+       where company_id = $1 and owner_user_id = $2 and chunk_text ilike $3
+       limit $4`,
+      [params.companyId, params.ownerUserId, `%${params.query.slice(0, 64)}%`, params.limit]
+    )
+  })
+
+  if (ftsResult.rows.length > 0) {
+    return ftsResult.rows.map((row) => ({ ...row, score: Number(row.score || 0) }))
+  }
+
+  const fallback = await dbQuery<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number }>(
+    `select
+      item_id::text as item_id,
+      chunk_index,
+      chunk_text,
+      source_locator,
+      0.1::float8 as score
      from public.notebook_chunks
      where company_id = $1 and owner_user_id = $2 and chunk_text ilike $3
      limit $4`,
     [params.companyId, params.ownerUserId, `%${params.query.slice(0, 64)}%`, params.limit]
   )
 
-  return result.rows
+  return fallback.rows.map((row) => ({ ...row, score: Number(row.score || 0) }))
 }
 
 export async function getNotebookItemTitles(companyId: string, ownerUserId: string, itemIds: string[]): Promise<Map<string, string | null>> {

@@ -24,6 +24,9 @@ function parseCursor(value) {
 function encodeCursor(updatedAt, id) {
     return `${updatedAt}|${id}`;
 }
+function isUuid(value) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
 async function getContextMessages(req, roomId, anchorEventId, windowSize = 5) {
     const token = getBearerToken(req);
     const hsUrl = getMatrixBaseUrl(req);
@@ -403,97 +406,105 @@ export async function syncPush(req, res) {
     if (!deviceId || !Array.isArray(body.ops)) {
         return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing device_id or ops');
     }
-    const results = [];
-    for (const op of body.ops) {
-        const clientOpId = String(op.client_op_id || '').trim();
-        const entityId = String(op.entity_id || '').trim();
-        const entityType = op.entity_type === 'item_file' ? 'item_file' : 'item';
-        const opType = op.op_type === 'delete' ? 'delete' : op.op_type === 'create' ? 'create' : 'update';
-        if (!clientOpId || !entityId) {
-            results.push({ client_op_id: clientOpId || '', status: 'rejected', server_revision: null, conflict_copy_id: null });
-            continue;
-        }
-        const existed = await getSyncOpByClientOpId(context.companyId, context.userId, clientOpId);
-        if (existed) {
-            results.push({ client_op_id: clientOpId, status: 'duplicate', server_revision: null, conflict_copy_id: null });
-            continue;
-        }
-        try {
-            await createSyncOp({
-                companyId: context.companyId,
-                userId: context.userId,
-                deviceId,
-                entityType,
-                entityId,
-                opType,
-                opPayload: op.op_payload || {},
-                baseRevision: op.base_revision || null,
-                clientOpId
-            });
-        }
-        catch (error) {
-            if (error?.code === '23505') {
+    try {
+        const results = [];
+        for (const op of body.ops) {
+            const clientOpId = String(op.client_op_id || '').trim();
+            const entityId = String(op.entity_id || '').trim();
+            const entityType = op.entity_type === 'item_file' ? 'item_file' : 'item';
+            const opType = op.op_type === 'delete' ? 'delete' : op.op_type === 'create' ? 'create' : 'update';
+            if (!clientOpId || !entityId) {
+                results.push({ client_op_id: clientOpId || '', status: 'rejected', server_revision: null, conflict_copy_id: null });
+                continue;
+            }
+            if (!isUuid(entityId)) {
+                return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Invalid entity_id, must be UUID');
+            }
+            const existed = await getSyncOpByClientOpId(context.companyId, context.userId, clientOpId);
+            if (existed) {
                 results.push({ client_op_id: clientOpId, status: 'duplicate', server_revision: null, conflict_copy_id: null });
                 continue;
             }
-            throw error;
+            try {
+                await createSyncOp({
+                    companyId: context.companyId,
+                    userId: context.userId,
+                    deviceId,
+                    entityType,
+                    entityId,
+                    opType,
+                    opPayload: op.op_payload || {},
+                    baseRevision: op.base_revision || null,
+                    clientOpId
+                });
+            }
+            catch (error) {
+                if (error?.code === '23505') {
+                    results.push({ client_op_id: clientOpId, status: 'duplicate', server_revision: null, conflict_copy_id: null });
+                    continue;
+                }
+                throw error;
+            }
+            const item = await getNotebookItemByOwner(context.companyId, context.userId, entityId);
+            const baseRevision = Number(op.base_revision || 0);
+            if (item && baseRevision > 0 && Number(item.revision) !== baseRevision) {
+                const copyId = randomUUID();
+                await updateSyncOpStatus({
+                    clientOpId,
+                    status: 'conflict',
+                    conflictCopy: {
+                        id: copyId,
+                        server: item,
+                        client_payload: op.op_payload || {},
+                        strategy: 'LWW_WITH_COPY'
+                    },
+                    appliedAt: true
+                });
+                results.push({ client_op_id: clientOpId, status: 'conflict', server_revision: Number(item.revision), conflict_copy_id: copyId });
+                continue;
+            }
+            let nextRevision = Number(item?.revision || 0);
+            if (opType === 'create') {
+                const payload = op.op_payload || {};
+                const created = await repoCreateNotebookItem({
+                    companyId: context.companyId,
+                    ownerUserId: context.userId,
+                    title: String(payload.title || '').trim() || null,
+                    contentMarkdown: String(payload.content_markdown || '').trim() || null,
+                    itemType: payload.item_type === 'file' ? 'file' : 'text',
+                    isIndexable: Boolean(payload.is_indexable),
+                    fixedId: entityId
+                });
+                nextRevision = Number(created.revision || 1);
+            }
+            else if (opType === 'update') {
+                const payload = op.op_payload || {};
+                const updated = await updateNotebookItemByOwner(context.companyId, context.userId, entityId, {
+                    title: payload.title !== undefined ? String(payload.title || '').trim() || null : undefined,
+                    content_markdown: payload.content_markdown !== undefined ? String(payload.content_markdown || '').trim() || null : undefined,
+                    status: payload.status === 'deleted' ? 'deleted' : undefined,
+                    revision: nextRevision + 1
+                });
+                nextRevision = Number(updated?.revision || nextRevision + 1);
+            }
+            else {
+                const deleted = await updateNotebookItemByOwner(context.companyId, context.userId, entityId, {
+                    status: 'deleted',
+                    revision: nextRevision + 1
+                });
+                nextRevision = Number(deleted?.revision || nextRevision + 1);
+            }
+            await updateSyncOpStatus({ clientOpId, status: 'applied', appliedAt: true });
+            results.push({ client_op_id: clientOpId, status: 'applied', server_revision: nextRevision, conflict_copy_id: null });
         }
-        const item = await getNotebookItemByOwner(context.companyId, context.userId, entityId);
-        const baseRevision = Number(op.base_revision || 0);
-        if (item && baseRevision > 0 && Number(item.revision) !== baseRevision) {
-            const copyId = randomUUID();
-            await updateSyncOpStatus({
-                clientOpId,
-                status: 'conflict',
-                conflictCopy: {
-                    id: copyId,
-                    server: item,
-                    client_payload: op.op_payload || {},
-                    strategy: 'LWW_WITH_COPY'
-                },
-                appliedAt: true
-            });
-            results.push({ client_op_id: clientOpId, status: 'conflict', server_revision: Number(item.revision), conflict_copy_id: copyId });
-            continue;
-        }
-        let nextRevision = Number(item?.revision || 0);
-        if (opType === 'create') {
-            const payload = op.op_payload || {};
-            const created = await repoCreateNotebookItem({
-                companyId: context.companyId,
-                ownerUserId: context.userId,
-                title: String(payload.title || '').trim() || null,
-                contentMarkdown: String(payload.content_markdown || '').trim() || null,
-                itemType: payload.item_type === 'file' ? 'file' : 'text',
-                isIndexable: Boolean(payload.is_indexable),
-                fixedId: entityId
-            });
-            nextRevision = Number(created.revision || 1);
-        }
-        else if (opType === 'update') {
-            const payload = op.op_payload || {};
-            const updated = await updateNotebookItemByOwner(context.companyId, context.userId, entityId, {
-                title: payload.title !== undefined ? String(payload.title || '').trim() || null : undefined,
-                content_markdown: payload.content_markdown !== undefined ? String(payload.content_markdown || '').trim() || null : undefined,
-                status: payload.status === 'deleted' ? 'deleted' : undefined,
-                revision: nextRevision + 1
-            });
-            nextRevision = Number(updated?.revision || nextRevision + 1);
-        }
-        else {
-            const deleted = await updateNotebookItemByOwner(context.companyId, context.userId, entityId, {
-                status: 'deleted',
-                revision: nextRevision + 1
-            });
-            nextRevision = Number(deleted?.revision || nextRevision + 1);
-        }
-        await updateSyncOpStatus({ clientOpId, status: 'applied', appliedAt: true });
-        results.push({ client_op_id: clientOpId, status: 'applied', server_revision: nextRevision, conflict_copy_id: null });
+        return res.json({
+            results,
+            server_cursor: new Date().toISOString()
+        });
     }
-    return res.json({
-        results,
-        server_cursor: new Date().toISOString()
-    });
+    catch (error) {
+        return sendNotebookError(res, 500, 'INTERNAL_ERROR', error?.message || 'SYNC_PUSH_FAILED');
+    }
 }
 export async function syncPull(req, res) {
     const context = await resolveNotebookAccessContext(req);

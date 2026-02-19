@@ -107,6 +107,97 @@
   - 指標（latency, success rate）
 - 對應 UAT: `UAT-15`
 
+### 2.1 RAG 優化映射（延伸）
+- [ ] 進度: 規劃完成，待排程實作
+- 方案文件:
+  - `docs/notebook-rag-optimization-plan-2.1.md`
+- 2.1.1 深度解析（Advanced Parsing）:
+  - 對應 BE: `BE-04`
+  - 對應 UAT: `UAT-03`, `UAT-04`, `UAT-10`
+- 2.1.2 語義智能切塊（Smart Semantic Chunking）:
+  - 對應 BE: `BE-05`
+  - 對應 UAT: `UAT-03`, `UAT-04`, `UAT-05`
+- 2.1.3 檢索融合與重排序（Hybrid + RRF + Rerank）:
+  - 對應 BE: `BE-06`, `BE-07`, `BE-08`
+  - 對應 UAT: `UAT-05`, `UAT-06`, `UAT-07`, `UAT-08`
+- 驗收指標（建議）:
+  - Hit@3 較現況提升 >= 15%
+  - `/chat/assist/query` P95 延遲增幅 <= 30%
+
+### 2.1 RAG 延伸子任務拆解（可執行）
+
+#### Sprint A（資料品質）
+- [ ] `RAG-A1` PDF 深度解析接入（Marker/Docling 二擇一）
+  - 內容: 解析結果轉結構化 markdown，保留段落/標題/表格信息
+  - 工時估算: 2~3 人日
+  - 風險等級: 中
+  - 依賴: `BE-04` 現有解析管線
+  - 驗收:
+    - 同文件解析後噪聲行數下降
+    - 表格問答可引用到列欄內容
+- [ ] `RAG-A2` PDF 去噪（頁首頁尾/頁碼重複段）
+  - 內容: 索引前增加規則化清洗
+  - 工時估算: 1~1.5 人日
+  - 風險等級: 低
+  - 依賴: `RAG-A1`
+  - 驗收:
+    - `notebook_chunks` 重複文本比例下降
+    - 不影響非 PDF 檔案解析結果
+
+#### Sprint B（切塊品質）
+- [ ] `RAG-B1` Smart Chunking（標題/段落/列表邊界）
+  - 內容: 由固定長度切塊改為語義邊界優先
+  - 工時估算: 1.5~2 人日
+  - 風險等級: 中
+  - 依賴: `BE-05`
+  - 驗收:
+    - chunk 平均可讀長度提升
+    - 同 query 檢索結果更集中於正確段落
+- [ ] `RAG-B2` Code fence 保護與 overlap 調參
+  - 內容: 避免在程式碼區塊中間切段，調整 overlap 策略
+  - 工時估算: 0.5~1 人日
+  - 風險等級: 低
+  - 依賴: `RAG-B1`
+  - 驗收:
+    - 技術文件問題命中率提升
+    - 不出現 code snippet 斷裂導致語意損失
+
+#### Sprint C（排序品質）
+- [ ] `RAG-C1` Hybrid 檢索改造（BM25 + Vector + RRF）
+  - 內容: 由 merge 改為 RRF 融合（含可配置權重）
+  - 工時估算: 2~3 人日
+  - 風險等級: 中
+  - 依賴: `BE-06`
+  - 驗收:
+    - Hit@3 相對基線提升 >= 10%
+    - 排序前 5 名穩定度提升
+- [ ] `RAG-C2` 強信號捷徑（strong-signal shortcut）
+  - 內容: lexical 高信號 query 跳過昂貴步驟
+  - 工時估算: 0.5~1 人日
+  - 風險等級: 低
+  - 依賴: `RAG-C1`
+  - 驗收:
+    - 易命中 query 的延遲下降
+    - 回答品質不低於基線
+- [ ] `RAG-C3` Chunk-level rerank + position-aware blending
+  - 內容: rerank 目標改為最佳 chunk，並加位置權重融合
+  - 工時估算: 1.5~2 人日
+  - 風險等級: 中
+  - 依賴: `RAG-C1`
+  - 驗收:
+    - 引用段落精準度提升
+    - `UAT-05`/`UAT-06` 主觀評分改善
+
+#### 共通驗收與回歸
+- [ ] `RAG-X1` 檢索評測腳本（Hit@1/3/5 + latency）
+  - 工時估算: 1 人日
+  - 風險等級: 低
+  - 對應 UAT: `UAT-05`, `UAT-06`, `UAT-07`, `UAT-08`
+- [ ] `RAG-X2` 回歸基準建立（上線前後對比報告）
+  - 工時估算: 0.5 人日
+  - 風險等級: 低
+  - 產出: baseline 指標表 + 調參記錄
+
 ## 2.2 Admin/Company Console（gotradetalk-client/visitor）
 
 ### AD-01 Notebook AI 設定頁

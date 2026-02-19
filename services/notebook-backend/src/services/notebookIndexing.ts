@@ -19,6 +19,9 @@ import { parseDocument, fetchMatrixMediaBuffer } from './notebookParsing.js'
 import { deleteNotebookPointsByItem, ensureQdrantCollection, searchNotebookVectors, upsertNotebookPoints } from './notebookQdrant.js'
 import { enqueueNotebookJobId } from './notebookQueue.js'
 
+const STRONG_SIGNAL_MIN_SCORE = 0.82
+const STRONG_SIGNAL_MIN_GAP = 0.12
+
 export type IndexItemRow = {
   id: string
   company_id: string
@@ -150,25 +153,92 @@ export async function hybridSearchNotebook(params: {
   query: string
   topK: number
 }): Promise<Array<{ item_id: string; title: string | null; snippet: string; source_locator: string | null; score: number }>> {
-  const aiConfig = await getNotebookAiConfig(params.companyId)
+  const reciprocalRankFusion = (
+    lists: Array<Array<{ key: string }>>,
+    weights: number[] = [],
+    k = 60
+  ) => {
+    const scoreByKey = new Map<string, number>()
+    for (let listIndex = 0; listIndex < lists.length; listIndex += 1) {
+      const list = lists[listIndex] || []
+      const weight = weights[listIndex] ?? 1
+      for (let rank = 0; rank < list.length; rank += 1) {
+        const key = list[rank]?.key
+        if (!key) continue
+        const next = (scoreByKey.get(key) || 0) + (weight / (k + rank + 1))
+        scoreByKey.set(key, next)
+      }
+    }
+    return scoreByKey
+  }
+
   const topK = Math.max(1, params.topK)
-  const vector = await createEmbedding(aiConfig, params.query)
-  const vectorHits = await searchNotebookVectors(params.companyId, params.ownerUserId, vector, topK * 2)
   const bmRows = await searchChunksByQuery({
     companyId: params.companyId,
     ownerUserId: params.ownerUserId,
     query: params.query,
-    limit: topK * 2
+    limit: topK * 4
   })
 
-  const merged = new Map<string, { item_id: string; snippet: string; source_locator: string | null; score: number }>()
+  const bmTopScore = Number(bmRows[0]?.score || 0)
+  const bmSecondScore = Number(bmRows[1]?.score || 0)
+  const hasStrongSignal = bmRows.length > 0
+    && bmTopScore >= STRONG_SIGNAL_MIN_SCORE
+    && (bmTopScore - bmSecondScore) >= STRONG_SIGNAL_MIN_GAP
+
+  if (hasStrongSignal) {
+    const lexicalByKey = new Map<string, { item_id: string; snippet: string; source_locator: string | null; score: number }>()
+    for (const row of bmRows) {
+      const key = `${row.item_id}:${String(row.chunk_index || 0)}`
+      if (!lexicalByKey.has(key)) {
+        lexicalByKey.set(key, {
+          item_id: String(row.item_id),
+          snippet: String(row.chunk_text || ''),
+          source_locator: row.source_locator ? String(row.source_locator) : null,
+          score: Number(row.score || 0)
+        })
+      }
+    }
+
+    const lexicalCandidates = Array.from(lexicalByKey.values()).slice(0, topK)
+    const titleMap = await getNotebookItemTitles(
+      params.companyId,
+      params.ownerUserId,
+      Array.from(new Set(lexicalCandidates.map((c) => c.item_id)))
+    )
+
+    return lexicalCandidates.map((row) => ({
+      item_id: row.item_id,
+      title: titleMap.get(row.item_id) || null,
+      snippet: row.snippet,
+      source_locator: row.source_locator,
+      score: row.score
+    }))
+  }
+
+  const aiConfig = await getNotebookAiConfig(params.companyId)
+  const vector = await createEmbedding(aiConfig, params.query)
+  const vectorHits = await searchNotebookVectors(params.companyId, params.ownerUserId, vector, topK * 2)
+
+  const vectorList: Array<{ key: string; item_id: string; snippet: string; source_locator: string | null; base_score: number }> = []
+  const bm25List: Array<{ key: string; item_id: string; snippet: string; source_locator: string | null; base_score: number }> = []
+
+  const candidatesByKey = new Map<string, { item_id: string; snippet: string; source_locator: string | null; score: number }>()
 
   for (const hit of vectorHits) {
     const payload = hit.payload || {}
     const itemId = String(payload.item_id || '')
     const snippet = String(payload.chunk_text || payload.text || '')
     if (!itemId) continue
-    merged.set(`${itemId}:${String(payload.chunk_index || 0)}`, {
+    const key = `${itemId}:${String(payload.chunk_index || 0)}`
+    vectorList.push({
+      key,
+      item_id: itemId,
+      snippet,
+      source_locator: payload.source_locator ? String(payload.source_locator) : null,
+      base_score: Number(hit.score || 0)
+    })
+    candidatesByKey.set(key, {
       item_id: itemId,
       snippet,
       source_locator: payload.source_locator ? String(payload.source_locator) : null,
@@ -177,23 +247,57 @@ export async function hybridSearchNotebook(params: {
   }
 
   for (const row of bmRows || []) {
-    const key = `${row.item_id}:${row.source_locator || row.chunk_text.slice(0, 20)}`
-    if (!merged.has(key)) {
-      merged.set(key, {
+    const key = `${row.item_id}:${String(row.chunk_index || 0)}`
+    bm25List.push({
+      key,
+      item_id: String(row.item_id),
+      snippet: String(row.chunk_text || ''),
+      source_locator: row.source_locator ? String(row.source_locator) : null,
+      base_score: Number(row.score || 0.1)
+    })
+    if (!candidatesByKey.has(key)) {
+      candidatesByKey.set(key, {
         item_id: String(row.item_id),
         snippet: String(row.chunk_text || ''),
         source_locator: row.source_locator ? String(row.source_locator) : null,
-        score: 0.5
+        score: Number(row.score || 0.1)
       })
     }
   }
 
-  const candidates = Array.from(merged.values())
+  const fusedScores = reciprocalRankFusion(
+    [vectorList, bm25List],
+    [1.2, 1.0]
+  )
+
+  for (const [key, retrieval] of candidatesByKey.entries()) {
+    const fused = fusedScores.get(key) || 0
+    retrieval.score = fused > 0 ? fused : retrieval.score
+  }
+
+  const candidates = Array.from(candidatesByKey.values())
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(topK * 4, 12))
+
   const ranked = await rerankCandidates(
     aiConfig,
     params.query,
     candidates.map((c) => ({ text: c.snippet, score: c.score }))
   )
+
+  const maxRetrievalScore = Math.max(Number(candidates[0]?.score || 0), 0.000001)
+  const blended = ranked.map((row) => {
+    const retrievalRank = row.index + 1
+    const retrieval = candidates[row.index]
+    const retrievalNorm = Number(retrieval?.score || 0) / maxRetrievalScore
+
+    let retrievalWeight = 0.4
+    if (retrievalRank <= 3) retrievalWeight = 0.75
+    else if (retrievalRank <= 10) retrievalWeight = 0.6
+
+    const blendedScore = retrievalWeight * retrievalNorm + (1 - retrievalWeight) * Number(row.score || 0)
+    return { ...row, score: blendedScore }
+  }).sort((a, b) => b.score - a.score)
 
   const titleMap = await getNotebookItemTitles(
     params.companyId,
@@ -201,7 +305,7 @@ export async function hybridSearchNotebook(params: {
     Array.from(new Set(candidates.map((c) => c.item_id)))
   )
 
-  return ranked.slice(0, topK).map((row) => {
+  return blended.slice(0, topK).map((row) => {
     const candidate = candidates[row.index]
     return {
       item_id: candidate.item_id,

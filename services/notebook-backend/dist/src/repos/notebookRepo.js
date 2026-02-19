@@ -213,11 +213,41 @@ export async function deleteChunksByItem(companyId, itemId) {
      where company_id = $1 and item_id = $2`, [companyId, itemId]);
 }
 export async function searchChunksByQuery(params) {
-    const result = await dbQuery(`select item_id::text as item_id, chunk_text, source_locator
+    const ftsResult = await dbQuery(`select
+      item_id::text as item_id,
+      chunk_index,
+      chunk_text,
+      source_locator,
+      ts_rank_cd(to_tsvector('simple', chunk_text), websearch_to_tsquery('simple', $3)) as score
+     from public.notebook_chunks
+     where company_id = $1
+       and owner_user_id = $2
+       and to_tsvector('simple', chunk_text) @@ websearch_to_tsquery('simple', $3)
+     order by score desc
+     limit $4`, [params.companyId, params.ownerUserId, params.query, params.limit]).catch(async () => {
+        return dbQuery(`select
+        item_id::text as item_id,
+        chunk_index,
+        chunk_text,
+        source_locator,
+        0.1::float8 as score
+       from public.notebook_chunks
+       where company_id = $1 and owner_user_id = $2 and chunk_text ilike $3
+       limit $4`, [params.companyId, params.ownerUserId, `%${params.query.slice(0, 64)}%`, params.limit]);
+    });
+    if (ftsResult.rows.length > 0) {
+        return ftsResult.rows.map((row) => ({ ...row, score: Number(row.score || 0) }));
+    }
+    const fallback = await dbQuery(`select
+      item_id::text as item_id,
+      chunk_index,
+      chunk_text,
+      source_locator,
+      0.1::float8 as score
      from public.notebook_chunks
      where company_id = $1 and owner_user_id = $2 and chunk_text ilike $3
      limit $4`, [params.companyId, params.ownerUserId, `%${params.query.slice(0, 64)}%`, params.limit]);
-    return result.rows;
+    return fallback.rows.map((row) => ({ ...row, score: Number(row.score || 0) }));
 }
 export async function getNotebookItemTitles(companyId, ownerUserId, itemIds) {
     if (itemIds.length === 0)
