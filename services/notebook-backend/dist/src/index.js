@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import { requireHubUser } from './middleware/auth.js';
 import { assistFromContext, assistQuery, attachNotebookFile, createNotebookItem, deleteNotebookItem, getMeCapabilities, getNotebookIndexStatus, listNotebookItems, retryNotebookIndexJob, syncPull, syncPush, updateNotebookItem } from './routes/notebook.js';
+import { getInternalNotebookAiSettings, upsertInternalNotebookAiSettings } from './routes/internalNotebookSettings.js';
 const app = express();
 const port = Number(process.env.PORT || 4010);
 const envCorsOrigins = (process.env.CORS_ORIGINS || '').split(',').map((item) => item.trim()).filter(Boolean);
@@ -33,6 +34,8 @@ app.post('/chat/assist/query', requireHubUser, assistQuery);
 app.post('/chat/assist/from-context', requireHubUser, assistFromContext);
 app.post('/notebook/sync/push', requireHubUser, syncPush);
 app.get('/notebook/sync/pull', requireHubUser, syncPull);
+app.get('/internal/company/settings/notebook-ai', getInternalNotebookAiSettings);
+app.put('/internal/company/settings/notebook-ai', upsertInternalNotebookAiSettings);
 app.listen(port, () => {
     console.log(`Notebook backend listening on :${port}`);
 });
