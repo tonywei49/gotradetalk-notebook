@@ -7,11 +7,13 @@ Apply order (`up`):
 1. `000_notebook_baseline.up.sql`
 2. `016_notebook_rag_core.up.sql`
 3. `017_notebook_ai_provider_profiles.up.sql`
+4. `018_notebook_ai_ocr_provider.up.sql`
 
 Rollback order (`down`):
-1. `017_notebook_ai_provider_profiles.down.sql`
-2. `016_notebook_rag_core.down.sql`
-3. `000_notebook_baseline.down.sql`
+1. `018_notebook_ai_ocr_provider.down.sql`
+2. `017_notebook_ai_provider_profiles.down.sql`
+3. `016_notebook_rag_core.down.sql`
+4. `000_notebook_baseline.down.sql`
 
 ## FK Decision
 We keep FK integrity in notebook core tables and provide local minimal dependency tables (`companies`, `profiles`, `company_settings`, `company_memberships`) in baseline migration.

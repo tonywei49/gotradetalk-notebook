@@ -8,9 +8,12 @@ export type NotebookAiConfig = {
   embeddingApiKey: string
   rerankBaseUrl: string
   rerankApiKey: string
+  ocrBaseUrl: string
+  ocrApiKey: string
   chatModel: string
   embeddingModel: string
   rerankModel: string | null
+  ocrModel: string | null
   topK: number
   scoreThreshold: number
   maxContextTokens: number
@@ -68,9 +71,12 @@ export async function getNotebookAiConfig(companyId: string): Promise<NotebookAi
     embeddingApiKey: String(data?.notebook_ai_embedding_api_key || fallbackApiKey),
     rerankBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_rerank_base_url || fallbackBaseUrl)),
     rerankApiKey: String(data?.notebook_ai_rerank_api_key || fallbackApiKey),
+    ocrBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_ocr_base_url || fallbackBaseUrl)),
+    ocrApiKey: String(data?.notebook_ai_ocr_api_key || fallbackApiKey),
     chatModel: String(data?.notebook_ai_chat_model || 'gpt-4o-mini'),
     embeddingModel: String(data?.notebook_ai_embedding_model || 'text-embedding-3-small'),
     rerankModel: data?.notebook_ai_rerank_model ? String(data.notebook_ai_rerank_model) : null,
+    ocrModel: data?.notebook_ai_ocr_model ? String(data.notebook_ai_ocr_model) : null,
     topK: Number(data?.notebook_ai_retrieval_top_k || 5),
     scoreThreshold: Number(data?.notebook_ai_score_threshold || 0.35),
     maxContextTokens: Number(data?.notebook_ai_max_context_tokens || 4096),

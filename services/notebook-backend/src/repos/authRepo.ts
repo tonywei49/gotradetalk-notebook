@@ -27,6 +27,9 @@ export type CompanySettingsRow = {
   notebook_ai_rerank_base_url: string | null
   notebook_ai_rerank_api_key: string | null
   notebook_ai_rerank_model: string | null
+  notebook_ai_ocr_base_url: string | null
+  notebook_ai_ocr_api_key: string | null
+  notebook_ai_ocr_model: string | null
   notebook_ai_retrieval_top_k: number
   notebook_ai_score_threshold: number
   notebook_ai_max_context_tokens: number
@@ -115,6 +118,9 @@ export async function getCompanySettings(companyId: string): Promise<CompanySett
       notebook_ai_rerank_base_url,
       notebook_ai_rerank_api_key,
       notebook_ai_rerank_model,
+      notebook_ai_ocr_base_url,
+      notebook_ai_ocr_api_key,
+      notebook_ai_ocr_model,
       notebook_ai_retrieval_top_k,
       notebook_ai_score_threshold,
       notebook_ai_max_context_tokens,
