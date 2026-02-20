@@ -1,5 +1,10 @@
 import { getCompanySettings } from '../repos/authRepo.js'
 
+const NOTEBOOK_AI_DEFAULT_BASE_URL = 'https://api.siliconflow.cn'
+const NOTEBOOK_AI_DEFAULT_EMBEDDING_MODEL = 'Qwen/Qwen3-Embedding-8B'
+const NOTEBOOK_AI_DEFAULT_RERANK_MODEL = 'BAAI/bge-reranker-v2-m3'
+const NOTEBOOK_AI_DEFAULT_OCR_MODEL = 'PaddlePaddle/PaddleOCR-VL-1.5'
+
 export type NotebookAiConfig = {
   enabled: boolean
   chatBaseUrl: string
@@ -60,7 +65,7 @@ function normalizeBaseUrl(value: string) {
 
 export async function getNotebookAiConfig(companyId: string): Promise<NotebookAiConfig> {
   const data = await getCompanySettings(companyId)
-  const fallbackBaseUrl = normalizeBaseUrl(String(data?.notebook_ai_llm_base_url || ''))
+  const fallbackBaseUrl = normalizeBaseUrl(String(data?.notebook_ai_llm_base_url || NOTEBOOK_AI_DEFAULT_BASE_URL))
   const fallbackApiKey = String(data?.notebook_ai_llm_api_key || '')
 
   return {
@@ -74,9 +79,11 @@ export async function getNotebookAiConfig(companyId: string): Promise<NotebookAi
     ocrBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_ocr_base_url || fallbackBaseUrl)),
     ocrApiKey: String(data?.notebook_ai_ocr_api_key || fallbackApiKey),
     chatModel: String(data?.notebook_ai_chat_model || 'gpt-4o-mini'),
-    embeddingModel: String(data?.notebook_ai_embedding_model || 'text-embedding-3-small'),
-    rerankModel: data?.notebook_ai_rerank_model ? String(data.notebook_ai_rerank_model) : null,
-    ocrModel: data?.notebook_ai_ocr_model ? String(data.notebook_ai_ocr_model) : null,
+    embeddingModel: String(data?.notebook_ai_embedding_model || NOTEBOOK_AI_DEFAULT_EMBEDDING_MODEL),
+    rerankModel: data?.notebook_ai_rerank_model
+      ? String(data.notebook_ai_rerank_model)
+      : NOTEBOOK_AI_DEFAULT_RERANK_MODEL,
+    ocrModel: data?.notebook_ai_ocr_model ? String(data.notebook_ai_ocr_model) : NOTEBOOK_AI_DEFAULT_OCR_MODEL,
     topK: Number(data?.notebook_ai_retrieval_top_k || 5),
     scoreThreshold: Number(data?.notebook_ai_score_threshold || 0.35),
     maxContextTokens: Number(data?.notebook_ai_max_context_tokens || 4096),
