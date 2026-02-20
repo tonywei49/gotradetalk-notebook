@@ -65,19 +65,18 @@ function normalizeBaseUrl(value: string) {
 
 export async function getNotebookAiConfig(companyId: string): Promise<NotebookAiConfig> {
   const data = await getCompanySettings(companyId)
-  const fallbackBaseUrl = normalizeBaseUrl(String(data?.notebook_ai_llm_base_url || NOTEBOOK_AI_DEFAULT_BASE_URL))
-  const fallbackApiKey = String(data?.notebook_ai_llm_api_key || '')
+  const defaultBaseUrl = normalizeBaseUrl(NOTEBOOK_AI_DEFAULT_BASE_URL)
 
   return {
     enabled: Boolean(data?.notebook_ai_enabled),
-    chatBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_chat_base_url || fallbackBaseUrl)),
-    chatApiKey: String(data?.notebook_ai_chat_api_key || fallbackApiKey),
-    embeddingBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_embedding_base_url || fallbackBaseUrl)),
-    embeddingApiKey: String(data?.notebook_ai_embedding_api_key || fallbackApiKey),
-    rerankBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_rerank_base_url || fallbackBaseUrl)),
-    rerankApiKey: String(data?.notebook_ai_rerank_api_key || fallbackApiKey),
-    ocrBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_ocr_base_url || fallbackBaseUrl)),
-    ocrApiKey: String(data?.notebook_ai_ocr_api_key || fallbackApiKey),
+    chatBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_chat_base_url || defaultBaseUrl)),
+    chatApiKey: String(data?.notebook_ai_chat_api_key || ''),
+    embeddingBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_embedding_base_url || defaultBaseUrl)),
+    embeddingApiKey: String(data?.notebook_ai_embedding_api_key || ''),
+    rerankBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_rerank_base_url || defaultBaseUrl)),
+    rerankApiKey: String(data?.notebook_ai_rerank_api_key || ''),
+    ocrBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_ocr_base_url || defaultBaseUrl)),
+    ocrApiKey: String(data?.notebook_ai_ocr_api_key || ''),
     chatModel: String(data?.notebook_ai_chat_model || 'gpt-4o-mini'),
     embeddingModel: String(data?.notebook_ai_embedding_model || NOTEBOOK_AI_DEFAULT_EMBEDDING_MODEL),
     rerankModel: data?.notebook_ai_rerank_model
