@@ -188,6 +188,9 @@ export async function requireHubUser(req: Request, res: Response, next: NextFunc
     const { data, error } = await supabaseAdmin.auth.getUser(token)
     if (!error && data.user) {
       let profile = await getProfileByAuthUserIdOrId(data.user.id)
+      if (profile && !String(profile.company_id || '').trim()) {
+        profile = null
+      }
       if (!profile) {
         const syncedUserId = await syncProfileFromHub(req, token).catch(() => null)
         if (syncedUserId) {
