@@ -1,10 +1,12 @@
 import type { Request, Response, NextFunction } from 'express'
 import { isSupabaseAuthConfigured, supabaseAdmin } from '../supabase.js'
 import type { RequestUser } from '../types.js'
+import { dbQuery } from '../db.js'
 import {
   getCompanyByHsDomain,
   getProfileByAuthUserIdOrId,
   getProfileByMatrixUserId,
+  getProfileById,
   getStaffProfileByLocalId,
   listMembershipsByUserId
 } from '../repos/authRepo.js'
@@ -23,6 +25,79 @@ function getBearerToken(req: Request) {
 
 function normalizeBaseUrl(value: string) {
   return value.endsWith('/') ? value.slice(0, -1) : value
+}
+
+type HubMePayload = {
+  user_id?: string
+  company_id?: string | null
+  memberships?: Array<{ company_id: string; role: string }>
+  profile?: {
+    user_type?: string | null
+    user_local_id?: string | null
+    matrix_user_id?: string | null
+  } | null
+}
+
+async function syncProfileFromHub(req: Request, token: string): Promise<string | null> {
+  const hsUrl = String(req.query.hs_url || req.headers['x-hs-url'] || '').trim()
+  const matrixUserId = String(req.query.matrix_user_id || req.headers['x-matrix-user-id'] || '').trim()
+  if (!hsUrl && !matrixUserId) return null
+
+  const hubBase = String(process.env.HUB_API_BASE_URL || 'https://api.gotradetalk.com').trim().replace(/\/+$/, '')
+  const meUrl = new URL(`${hubBase}/me`)
+  if (hsUrl) meUrl.searchParams.set('hs_url', hsUrl)
+  if (matrixUserId) meUrl.searchParams.set('matrix_user_id', matrixUserId)
+
+  const response = await fetch(meUrl.toString(), {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  })
+  if (!response.ok) return null
+
+  const payload = await response.json() as HubMePayload
+  const userId = String(payload.user_id || '').trim()
+  const companyId = String(payload.company_id || payload.memberships?.[0]?.company_id || '').trim()
+  if (!userId || !companyId) return null
+
+  const userType = String(payload.profile?.user_type || 'staff').trim() || 'staff'
+  const userLocalId = String(payload.profile?.user_local_id || '').trim() || null
+  const resolvedMatrixUserId = String(payload.profile?.matrix_user_id || matrixUserId || '').trim() || null
+  const hsDomain = hsUrl ? new URL(normalizeBaseUrl(hsUrl)).host : null
+
+  await dbQuery(
+    `insert into public.companies (id, hs_domain)
+     values ($1::uuid, $2)
+     on conflict (id) do update set hs_domain = coalesce(excluded.hs_domain, public.companies.hs_domain)`,
+    [companyId, hsDomain]
+  )
+
+  await dbQuery(
+    `insert into public.profiles (id, company_id, user_type, user_local_id, matrix_user_id)
+     values ($1::uuid, $2::uuid, $3, $4, $5)
+     on conflict (id) do update
+     set company_id = excluded.company_id,
+         user_type = excluded.user_type,
+         user_local_id = coalesce(excluded.user_local_id, public.profiles.user_local_id),
+         matrix_user_id = coalesce(excluded.matrix_user_id, public.profiles.matrix_user_id)`,
+    [userId, companyId, userType, userLocalId, resolvedMatrixUserId]
+  )
+
+  const memberships = Array.isArray(payload.memberships) ? payload.memberships : []
+  for (const membership of memberships) {
+    const membershipCompanyId = String(membership.company_id || '').trim()
+    if (!membershipCompanyId) continue
+    const role = String(membership.role || 'member').trim() || 'member'
+    await dbQuery(
+      `insert into public.company_memberships (user_id, company_id, role)
+       values ($1::uuid, $2::uuid, $3)
+       on conflict (user_id, company_id) do update set role = excluded.role`,
+      [userId, membershipCompanyId, role]
+    )
+  }
+
+  return userId
 }
 
 async function fetchMatrixWhoami(matrixBaseUrl: string, accessToken: string) {
@@ -113,6 +188,12 @@ export async function requireHubUser(req: Request, res: Response, next: NextFunc
     const { data, error } = await supabaseAdmin.auth.getUser(token)
     if (!error && data.user) {
       let profile = await getProfileByAuthUserIdOrId(data.user.id)
+      if (!profile) {
+        const syncedUserId = await syncProfileFromHub(req, token).catch(() => null)
+        if (syncedUserId) {
+          profile = await getProfileById(syncedUserId)
+        }
+      }
       if (!profile && matrixUserId) {
         profile = await getProfileByMatrixUserId(matrixUserId)
       }
