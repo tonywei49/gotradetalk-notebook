@@ -59,19 +59,24 @@ async function syncProfileFromHub(req: Request, token: string): Promise<string |
   const payload = await response.json() as HubMePayload
   const userId = String(payload.user_id || '').trim()
   const companyId = String(payload.company_id || payload.memberships?.[0]?.company_id || '').trim()
-  if (!userId || !companyId) return null
+  if (!userId) return null
 
   const userType = String(payload.profile?.user_type || 'staff').trim() || 'staff'
   const userLocalId = String(payload.profile?.user_local_id || '').trim() || null
   const resolvedMatrixUserId = String(payload.profile?.matrix_user_id || matrixUserId || '').trim() || null
   const hsDomain = hsUrl ? new URL(normalizeBaseUrl(hsUrl)).host : null
+  const localCompanyByHs = hsDomain ? await getCompanyByHsDomain(hsDomain) : null
+  const resolvedCompanyId = String(localCompanyByHs?.id || companyId).trim()
+  if (!resolvedCompanyId) return null
 
-  await dbQuery(
-    `insert into public.companies (id, hs_domain)
-     values ($1::uuid, $2)
-     on conflict (id) do update set hs_domain = coalesce(excluded.hs_domain, public.companies.hs_domain)`,
-    [companyId, hsDomain]
-  )
+  if (!localCompanyByHs) {
+    await dbQuery(
+      `insert into public.companies (id, hs_domain)
+       values ($1::uuid, $2)
+       on conflict (id) do update set hs_domain = coalesce(excluded.hs_domain, public.companies.hs_domain)`,
+      [resolvedCompanyId, hsDomain]
+    )
+  }
 
   await dbQuery(
     `insert into public.profiles (id, company_id, user_type, user_local_id, matrix_user_id)
@@ -81,7 +86,7 @@ async function syncProfileFromHub(req: Request, token: string): Promise<string |
          user_type = excluded.user_type,
          user_local_id = coalesce(excluded.user_local_id, public.profiles.user_local_id),
          matrix_user_id = coalesce(excluded.matrix_user_id, public.profiles.matrix_user_id)`,
-    [userId, companyId, userType, userLocalId, resolvedMatrixUserId]
+    [userId, resolvedCompanyId, userType, userLocalId, resolvedMatrixUserId]
   )
 
   const memberships = Array.isArray(payload.memberships) ? payload.memberships : []
