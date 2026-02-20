@@ -36,4 +36,3 @@ export async function runImageOcr(params: {
     text: String(result.text || '').trim()
   }
 }
-

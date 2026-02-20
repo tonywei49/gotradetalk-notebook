@@ -283,7 +283,7 @@ export async function attachNotebookFile(req: Request, res: Response) {
     return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing matrix_media_mxc')
   }
 
-  const supported = ['pdf', 'docx', 'csv', 'xlsx', 'txt', 'md']
+  const supported = ['pdf', 'docx', 'csv', 'xlsx', 'txt', 'md', 'jpg', 'jpeg', 'png', 'webp']
   const fileName = String(body.matrix_media_name || '').toLowerCase()
   const mime = String(body.matrix_media_mime || '').toLowerCase()
   const ext = fileName.split('.').pop() || ''
