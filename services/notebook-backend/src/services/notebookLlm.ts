@@ -2,8 +2,12 @@ import { getCompanySettings } from '../repos/authRepo.js'
 
 export type NotebookAiConfig = {
   enabled: boolean
-  baseUrl: string
-  apiKey: string
+  chatBaseUrl: string
+  chatApiKey: string
+  embeddingBaseUrl: string
+  embeddingApiKey: string
+  rerankBaseUrl: string
+  rerankApiKey: string
   chatModel: string
   embeddingModel: string
   rerankModel: string | null
@@ -13,17 +17,57 @@ export type NotebookAiConfig = {
   allowLowConfidenceSend: boolean
 }
 
+function normalizeResponseLanguage(value?: string | null): string {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (!normalized) return 'zh-TW'
+  return normalized
+}
+
+function buildLanguageInstruction(language: string): string {
+  const lang = normalizeResponseLanguage(language)
+
+  if (lang === 'zh-tw' || lang === 'zh_hant' || lang === 'zh-hant') {
+    return '請以繁體中文回答，並在最後輸出一行 CONFIDENCE:0~1。'
+  }
+  if (lang === 'zh-cn' || lang === 'zh_hans' || lang === 'zh-hans') {
+    return '請以簡體中文回答，並在最後輸出一行 CONFIDENCE:0~1。'
+  }
+  if (lang.startsWith('zh')) {
+    return '請以中文回答，並在最後輸出一行 CONFIDENCE:0~1。'
+  }
+  if (lang.startsWith('en')) {
+    return 'Please answer in English and append one line at the end: CONFIDENCE:0~1.'
+  }
+  if (lang.startsWith('ja')) {
+    return '日本語で回答し、最後に1行で CONFIDENCE:0~1 を出力してください。'
+  }
+  if (lang.startsWith('ko')) {
+    return '한국어로 답변하고 마지막 줄에 CONFIDENCE:0~1을 출력하세요.'
+  }
+  if (lang.startsWith('vi')) {
+    return 'Vui lòng trả lời bằng tiếng Việt và thêm một dòng cuối: CONFIDENCE:0~1.'
+  }
+
+  return `Please answer in ${language} and append one line at the end: CONFIDENCE:0~1.`
+}
+
 function normalizeBaseUrl(value: string) {
   return value.endsWith('/') ? value.slice(0, -1) : value
 }
 
 export async function getNotebookAiConfig(companyId: string): Promise<NotebookAiConfig> {
   const data = await getCompanySettings(companyId)
+  const fallbackBaseUrl = normalizeBaseUrl(String(data?.notebook_ai_llm_base_url || ''))
+  const fallbackApiKey = String(data?.notebook_ai_llm_api_key || '')
 
   return {
     enabled: Boolean(data?.notebook_ai_enabled),
-    baseUrl: normalizeBaseUrl(String(data?.notebook_ai_llm_base_url || '')),
-    apiKey: String(data?.notebook_ai_llm_api_key || ''),
+    chatBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_chat_base_url || fallbackBaseUrl)),
+    chatApiKey: String(data?.notebook_ai_chat_api_key || fallbackApiKey),
+    embeddingBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_embedding_base_url || fallbackBaseUrl)),
+    embeddingApiKey: String(data?.notebook_ai_embedding_api_key || fallbackApiKey),
+    rerankBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_rerank_base_url || fallbackBaseUrl)),
+    rerankApiKey: String(data?.notebook_ai_rerank_api_key || fallbackApiKey),
     chatModel: String(data?.notebook_ai_chat_model || 'gpt-4o-mini'),
     embeddingModel: String(data?.notebook_ai_embedding_model || 'text-embedding-3-small'),
     rerankModel: data?.notebook_ai_rerank_model ? String(data.notebook_ai_rerank_model) : null,
@@ -42,13 +86,13 @@ function authHeaders(apiKey: string) {
 }
 
 export async function createEmbedding(config: NotebookAiConfig, text: string): Promise<number[]> {
-  if (!config.baseUrl || !config.apiKey) {
+  if (!config.embeddingBaseUrl || !config.embeddingApiKey) {
     throw new Error('CAPABILITY_DISABLED')
   }
 
-  const resp = await fetch(`${config.baseUrl}/v1/embeddings`, {
+  const resp = await fetch(`${config.embeddingBaseUrl}/v1/embeddings`, {
     method: 'POST',
-    headers: authHeaders(config.apiKey),
+    headers: authHeaders(config.embeddingApiKey),
     body: JSON.stringify({ model: config.embeddingModel, input: text })
   })
 
@@ -71,13 +115,13 @@ export async function rerankCandidates(
   query: string,
   candidates: Array<{ text: string; score: number }>
 ): Promise<Array<{ text: string; score: number; index: number }>> {
-  if (!config.rerankModel || candidates.length === 0) {
+  if (!config.rerankModel || candidates.length === 0 || !config.rerankBaseUrl || !config.rerankApiKey) {
     return candidates.map((item, index) => ({ ...item, index }))
   }
 
-  const resp = await fetch(`${config.baseUrl}/v1/rerank`, {
+  const resp = await fetch(`${config.rerankBaseUrl}/v1/rerank`, {
     method: 'POST',
-    headers: authHeaders(config.apiKey),
+    headers: authHeaders(config.rerankApiKey),
     body: JSON.stringify({
       model: config.rerankModel,
       query,
@@ -103,9 +147,15 @@ export async function rerankCandidates(
 export async function generateAssistAnswer(
   config: NotebookAiConfig,
   query: string,
-  contextBlocks: Array<{ source: string; text: string }>
+  contextBlocks: Array<{ source: string; text: string }>,
+  responseLanguage?: string | null
 ): Promise<{ answer: string; confidence: number }> {
+  if (!config.chatBaseUrl || !config.chatApiKey) {
+    throw new Error('CAPABILITY_DISABLED')
+  }
+
   const contextText = contextBlocks.map((c, idx) => `[S${idx + 1}] ${c.source}\n${c.text}`).join('\n\n')
+  const languageInstruction = buildLanguageInstruction(responseLanguage || 'zh-TW')
 
   const systemPrompt = [
     '你是 GoTradeTalk Notebook 助理。',
@@ -119,12 +169,12 @@ export async function generateAssistAnswer(
     `使用者問題：${query}`,
     '以下是可用來源：',
     contextText || '(無來源)',
-    '請以繁體中文回答，並在最後輸出一行 CONFIDENCE:0~1。'
+    languageInstruction
   ].join('\n\n')
 
-  const resp = await fetch(`${config.baseUrl}/v1/chat/completions`, {
+  const resp = await fetch(`${config.chatBaseUrl}/v1/chat/completions`, {
     method: 'POST',
-    headers: authHeaders(config.apiKey),
+    headers: authHeaders(config.chatApiKey),
     body: JSON.stringify({
       model: config.chatModel,
       temperature: 0.2,
