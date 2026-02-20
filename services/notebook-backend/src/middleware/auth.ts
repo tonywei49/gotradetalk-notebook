@@ -78,16 +78,31 @@ async function syncProfileFromHub(req: Request, token: string): Promise<string |
     )
   }
 
-  await dbQuery(
-    `insert into public.profiles (id, company_id, user_type, user_local_id, matrix_user_id)
-     values ($1::uuid, $2::uuid, $3, $4, $5)
-     on conflict (id) do update
-     set company_id = excluded.company_id,
-         user_type = excluded.user_type,
-         user_local_id = coalesce(excluded.user_local_id, public.profiles.user_local_id),
-         matrix_user_id = coalesce(excluded.matrix_user_id, public.profiles.matrix_user_id)`,
-    [userId, resolvedCompanyId, userType, userLocalId, resolvedMatrixUserId]
-  )
+  let resolvedProfileId = userId
+  const profileByMatrix = resolvedMatrixUserId ? await getProfileByMatrixUserId(resolvedMatrixUserId) : null
+  if (profileByMatrix?.id) {
+    resolvedProfileId = profileByMatrix.id
+    await dbQuery(
+      `update public.profiles
+       set company_id = $2::uuid,
+           user_type = $3,
+           user_local_id = coalesce($4, user_local_id),
+           matrix_user_id = coalesce($5, matrix_user_id)
+       where id = $1::uuid`,
+      [resolvedProfileId, resolvedCompanyId, userType, userLocalId, resolvedMatrixUserId]
+    )
+  } else {
+    await dbQuery(
+      `insert into public.profiles (id, company_id, user_type, user_local_id, matrix_user_id)
+       values ($1::uuid, $2::uuid, $3, $4, $5)
+       on conflict (id) do update
+       set company_id = excluded.company_id,
+           user_type = excluded.user_type,
+           user_local_id = coalesce(excluded.user_local_id, public.profiles.user_local_id),
+           matrix_user_id = coalesce(excluded.matrix_user_id, public.profiles.matrix_user_id)`,
+      [resolvedProfileId, resolvedCompanyId, userType, userLocalId, resolvedMatrixUserId]
+    )
+  }
 
   const memberships = Array.isArray(payload.memberships) ? payload.memberships : []
   for (const membership of memberships) {
@@ -98,11 +113,11 @@ async function syncProfileFromHub(req: Request, token: string): Promise<string |
       `insert into public.company_memberships (user_id, company_id, role)
        values ($1::uuid, $2::uuid, $3)
        on conflict (user_id, company_id) do update set role = excluded.role`,
-      [userId, membershipCompanyId, role]
+      [resolvedProfileId, membershipCompanyId, role]
     )
   }
 
-  return userId
+  return resolvedProfileId
 }
 
 async function fetchMatrixWhoami(matrixBaseUrl: string, accessToken: string) {
