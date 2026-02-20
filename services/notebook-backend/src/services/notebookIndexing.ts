@@ -15,44 +15,12 @@ import {
 } from '../repos/notebookRepo.js'
 import { splitIntoChunks } from './notebookChunking.js'
 import { createEmbedding, getNotebookAiConfig, rerankCandidates } from './notebookLlm.js'
-import { parseDocument, fetchMatrixMediaBuffer } from './notebookParsing.js'
 import { deleteNotebookPointsByItem, ensureQdrantCollection, searchNotebookVectors, upsertNotebookPoints } from './notebookQdrant.js'
 import { enqueueNotebookJobId } from './notebookQueue.js'
+import { extractItemSource, type IndexItemRow } from './sourceExtractors.js'
 
 const STRONG_SIGNAL_MIN_SCORE = 0.82
 const STRONG_SIGNAL_MIN_GAP = 0.12
-
-export type IndexItemRow = {
-  id: string
-  company_id: string
-  owner_user_id: string
-  item_type: 'text' | 'file'
-  content_markdown: string | null
-  title: string | null
-  matrix_media_mxc: string | null
-  matrix_media_name: string | null
-  matrix_media_mime: string | null
-  is_indexable: boolean
-}
-
-async function extractItemText(item: IndexItemRow, matrixBaseUrl?: string, accessToken?: string) {
-  if (item.item_type === 'text') {
-    const text = `${item.title || ''}\n${item.content_markdown || ''}`.trim()
-    return { text, sourceType: 'text', sourceLocator: null as string | null }
-  }
-
-  if (!item.matrix_media_mxc || !matrixBaseUrl || !accessToken) {
-    throw new Error('INVALID_CONTEXT')
-  }
-
-  const media = await fetchMatrixMediaBuffer(matrixBaseUrl, accessToken, item.matrix_media_mxc)
-  const parsed = await parseDocument(media, item.matrix_media_mime, item.matrix_media_name)
-  return {
-    text: parsed.text,
-    sourceType: parsed.sourceType,
-    sourceLocator: parsed.sourceLocator || null
-  }
-}
 
 export async function enqueueNotebookIndexJob(params: {
   companyId: string
@@ -87,10 +55,20 @@ export async function runNotebookIndexJob(jobId: string, options?: { matrixBaseU
       await deleteChunksByItem(job.company_id, item.id)
       await upsertItemIndexState(item.id, 'skipped', null)
     } else {
-      const extracted = await extractItemText(item as IndexItemRow, options?.matrixBaseUrl, options?.accessToken)
+      const aiConfig = await getNotebookAiConfig(job.company_id)
+      const extracted = await extractItemSource({
+        item: item as IndexItemRow,
+        matrixBaseUrl: options?.matrixBaseUrl,
+        accessToken: options?.accessToken,
+        ocr: {
+          enabled: aiConfig.ocrEnabled,
+          baseUrl: aiConfig.ocrBaseUrl,
+          apiKey: aiConfig.ocrApiKey,
+          model: aiConfig.ocrModel
+        }
+      })
       const chunks = splitIntoChunks(extracted.text, Number(process.env.NOTEBOOK_CHUNK_SIZE || 1000), Number(process.env.NOTEBOOK_CHUNK_OVERLAP || 200))
 
-      const aiConfig = await getNotebookAiConfig(job.company_id)
       await ensureQdrantCollection()
 
       await replaceItemChunks({

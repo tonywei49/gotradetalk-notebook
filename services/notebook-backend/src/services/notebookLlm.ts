@@ -19,6 +19,7 @@ export type NotebookAiConfig = {
   embeddingModel: string
   rerankModel: string | null
   ocrModel: string | null
+  ocrEnabled: boolean
   topK: number
   scoreThreshold: number
   maxContextTokens: number
@@ -83,6 +84,7 @@ export async function getNotebookAiConfig(companyId: string): Promise<NotebookAi
       ? String(data.notebook_ai_rerank_model)
       : NOTEBOOK_AI_DEFAULT_RERANK_MODEL,
     ocrModel: data?.notebook_ai_ocr_model ? String(data.notebook_ai_ocr_model) : NOTEBOOK_AI_DEFAULT_OCR_MODEL,
+    ocrEnabled: Boolean(data?.notebook_ai_ocr_enabled),
     topK: Number(data?.notebook_ai_retrieval_top_k || 5),
     scoreThreshold: Number(data?.notebook_ai_score_threshold || 0.35),
     maxContextTokens: Number(data?.notebook_ai_max_context_tokens || 4096),
