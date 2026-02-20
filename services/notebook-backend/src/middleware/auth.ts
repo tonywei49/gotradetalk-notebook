@@ -112,7 +112,22 @@ export async function requireHubUser(req: Request, res: Response, next: NextFunc
   if (isSupabaseAuthConfigured && supabaseAdmin) {
     const { data, error } = await supabaseAdmin.auth.getUser(token)
     if (!error && data.user) {
-      const profile = await getProfileByAuthUserIdOrId(data.user.id)
+      let profile = await getProfileByAuthUserIdOrId(data.user.id)
+      if (!profile && matrixUserId) {
+        profile = await getProfileByMatrixUserId(matrixUserId)
+      }
+      if (!profile && matrixUserId) {
+        const localPart = matrixUserId.startsWith('@') ? matrixUserId.slice(1).split(':')[0] : ''
+        const hsUrl = String(req.query.hs_url || req.headers['x-hs-url'] || '').trim()
+        const host = hsUrl ? new URL(normalizeBaseUrl(hsUrl)).host : ''
+        if (localPart && host) {
+          const company = await getCompanyByHsDomain(host)
+          if (company?.id) {
+            profile = await getStaffProfileByLocalId(company.id, localPart)
+          }
+        }
+      }
+
       const resolvedUserId = profile?.id || data.user.id
       const memberships = await listMembershipsByUserId(resolvedUserId)
 
