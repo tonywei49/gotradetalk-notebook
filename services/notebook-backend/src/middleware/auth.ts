@@ -248,6 +248,22 @@ export async function requireHubUser(req: Request, res: Response, next: NextFunc
     }
   }
 
+  // Fallback path: validate hub/supabase JWT via hub /me and bootstrap local profile context.
+  // This avoids rejecting valid business JWTs when local supabase admin validation is out of sync.
+  const syncedUserId = await syncProfileFromHub(req, token).catch(() => null)
+  if (syncedUserId) {
+    const profile = await getProfileById(syncedUserId)
+    const memberships = await listMembershipsByUserId(syncedUserId)
+    const requestUser: RequestUser = {
+      id: syncedUserId,
+      userType: profile?.user_type,
+      isEmployee: memberships.length > 0 || profile?.user_type === 'staff',
+      memberships
+    }
+    ;(req as any).user = requestUser
+    return next()
+  }
+
   try {
     const hsUrl = String(req.query.hs_url || req.headers['x-hs-url'] || '').trim()
     if (!hsUrl) {

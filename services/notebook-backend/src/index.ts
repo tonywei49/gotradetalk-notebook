@@ -22,15 +22,31 @@ const app = express()
 const port = Number(process.env.PORT || 4010)
 
 const envCorsOrigins = (process.env.CORS_ORIGINS || '').split(',').map((item) => item.trim()).filter(Boolean)
-const defaultCorsOrigins = ['http://localhost:8080', 'http://localhost:5173']
-const corsOrigins = envCorsOrigins.length ? Array.from(new Set([...envCorsOrigins, ...defaultCorsOrigins])) : defaultCorsOrigins
+const defaultCorsOrigins = [
+  'http://localhost:8080',
+  'http://localhost:5173',
+  'https://chat.gotradetalk.com'
+]
+const corsOrigins = envCorsOrigins.length
+  ? Array.from(new Set([...envCorsOrigins, ...defaultCorsOrigins]))
+  : defaultCorsOrigins
+
+function isAllowedCorsOrigin(origin: string) {
+  if (corsOrigins.includes('*')) return true
+  if (corsOrigins.includes(origin)) return true
+  if (/^https:\/\/[a-z0-9-]+\.gotradetalk-ui\.pages\.dev$/i.test(origin)) return true
+  return false
+}
 
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true)
-    if (corsOrigins.includes(origin)) return callback(null, true)
+    if (isAllowedCorsOrigin(origin)) return callback(null, true)
     return callback(new Error('Not allowed by CORS'))
   },
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Authorization', 'Content-Type', 'X-HS-URL', 'X-Matrix-User-Id'],
+  optionsSuccessStatus: 204,
   credentials: true
 }))
 app.use(express.json())
