@@ -44,7 +44,7 @@ async function extractSingleFileSource(params: {
   }
 }) {
   const file = params.file
-  if (!file.matrix_media_mxc || !params.matrixBaseUrl || !params.accessToken) {
+  if (!file.matrix_media_mxc || !params.matrixBaseUrl) {
     throw new Error('INVALID_CONTEXT')
   }
 

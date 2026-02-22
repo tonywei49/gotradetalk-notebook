@@ -119,21 +119,60 @@ async function streamToBuffer(stream) {
     }
     return Buffer.concat(chunks);
 }
+async function readResponseBodySafe(resp) {
+    try {
+        return await resp.text();
+    }
+    catch {
+        return '';
+    }
+}
+async function fetchDownload(matrixBaseUrl, path, accessToken, asQueryToken = false) {
+    const url = new URL(path, matrixBaseUrl);
+    const headers = {};
+    if (accessToken && !asQueryToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+    }
+    if (accessToken && asQueryToken) {
+        url.searchParams.set('access_token', accessToken);
+    }
+    return fetch(url, { headers });
+}
 export async function fetchMatrixMediaBuffer(matrixBaseUrl, accessToken, mxc) {
     const normalized = mxc.replace('mxc://', '');
     const [serverName, mediaId] = normalized.split('/');
     if (!serverName || !mediaId) {
         throw new Error('INVALID_MXC');
     }
-    const url = new URL(`/_matrix/media/v3/download/${encodeURIComponent(serverName)}/${encodeURIComponent(mediaId)}`, matrixBaseUrl);
-    const resp = await fetch(url, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-    });
-    if (!resp.ok || !resp.body) {
-        const text = await resp.text().catch(() => '');
-        throw new Error(`MEDIA_DOWNLOAD_FAILED: ${resp.status} ${text}`);
+    const encodedServer = encodeURIComponent(serverName);
+    const encodedMedia = encodeURIComponent(mediaId);
+    const candidatePaths = [
+        `/_matrix/media/v3/download/${encodedServer}/${encodedMedia}`,
+        `/_matrix/client/v1/media/download/${encodedServer}/${encodedMedia}`,
+        `/_matrix/media/r0/download/${encodedServer}/${encodedMedia}`
+    ];
+    let lastStatus = 0;
+    let lastBody = '';
+    const attempts = [];
+    if (accessToken) {
+        attempts.push({ token: accessToken, asQuery: false });
+        attempts.push({ token: accessToken, asQuery: true });
     }
-    return streamToBuffer(Readable.fromWeb(resp.body));
+    attempts.push({ token: undefined, asQuery: false });
+    for (const attempt of attempts) {
+        for (const path of candidatePaths) {
+            const resp = await fetchDownload(matrixBaseUrl, path, attempt.token, Boolean(attempt.asQuery));
+            if (resp.ok && resp.body) {
+                return streamToBuffer(Readable.fromWeb(resp.body));
+            }
+            lastStatus = resp.status;
+            lastBody = await readResponseBodySafe(resp);
+        }
+    }
+    const hint = accessToken
+        ? ' (check NOTEBOOK_INDEX_MATRIX_ACCESS_TOKEN and NOTEBOOK_INDEX_MATRIX_HS_URL)'
+        : ' (missing NOTEBOOK_INDEX_MATRIX_ACCESS_TOKEN)';
+    throw new Error(`MEDIA_DOWNLOAD_FAILED: ${lastStatus} ${lastBody}${hint}`);
 }
 export async function parseDocument(buffer, matrixMediaMime, matrixMediaName) {
     const type = normalizeMime(matrixMediaMime, matrixMediaName);
