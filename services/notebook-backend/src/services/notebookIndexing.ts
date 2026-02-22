@@ -3,6 +3,7 @@ import {
   createIndexJob,
   deleteChunksByItem,
   getIndexJobById,
+  listActiveNotebookItemFilesByItem,
   getNotebookItemByCompany,
   getNotebookItemTitles,
   listPendingIndexJobIds,
@@ -17,7 +18,7 @@ import { splitIntoChunks } from './notebookChunking.js'
 import { createEmbedding, getNotebookAiConfig, rerankCandidates } from './notebookLlm.js'
 import { deleteNotebookPointsByItem, ensureQdrantCollection, searchNotebookVectors, upsertNotebookPoints } from './notebookQdrant.js'
 import { enqueueNotebookJobId } from './notebookQueue.js'
-import { extractItemSource, type IndexItemRow } from './sourceExtractors.js'
+import { extractItemSources, type IndexItemFileRow, type IndexItemRow } from './sourceExtractors.js'
 
 const STRONG_SIGNAL_MIN_SCORE = 0.82
 const STRONG_SIGNAL_MIN_GAP = 0.12
@@ -56,8 +57,10 @@ export async function runNotebookIndexJob(jobId: string, options?: { matrixBaseU
       await upsertItemIndexState(item.id, 'skipped', null)
     } else {
       const aiConfig = await getNotebookAiConfig(job.company_id)
-      const extracted = await extractItemSource({
+      const files = await listActiveNotebookItemFilesByItem(job.company_id, item.id)
+      const extractedList = await extractItemSources({
         item: item as IndexItemRow,
+        files: files as IndexItemFileRow[],
         matrixBaseUrl: options?.matrixBaseUrl,
         accessToken: options?.accessToken,
         ocr: {
@@ -67,7 +70,22 @@ export async function runNotebookIndexJob(jobId: string, options?: { matrixBaseU
           model: aiConfig.ocrModel
         }
       })
-      const chunks = splitIntoChunks(extracted.text, Number(process.env.NOTEBOOK_CHUNK_SIZE || 1000), Number(process.env.NOTEBOOK_CHUNK_OVERLAP || 200))
+      let chunkIndexOffset = 0
+      const chunks = extractedList.flatMap((extracted) => {
+        const sourceChunks = splitIntoChunks(
+          extracted.text,
+          Number(process.env.NOTEBOOK_CHUNK_SIZE || 1000),
+          Number(process.env.NOTEBOOK_CHUNK_OVERLAP || 200)
+        )
+        const mapped = sourceChunks.map((chunk, localIdx) => ({
+          ...chunk,
+          chunkIndex: chunkIndexOffset + localIdx,
+          sourceType: extracted.sourceType,
+          sourceLocator: extracted.sourceLocator
+        }))
+        chunkIndexOffset += sourceChunks.length
+        return mapped
+      })
 
       await ensureQdrantCollection()
 
@@ -75,8 +93,6 @@ export async function runNotebookIndexJob(jobId: string, options?: { matrixBaseU
         itemId: item.id,
         companyId: item.company_id,
         ownerUserId: item.owner_user_id,
-        sourceType: extracted.sourceType,
-        sourceLocator: extracted.sourceLocator,
         chunks
       })
 
@@ -93,8 +109,8 @@ export async function runNotebookIndexJob(jobId: string, options?: { matrixBaseU
             owner_user_id: item.owner_user_id,
             chunk_index: chunk.chunkIndex,
             content_hash: chunk.contentHash,
-            source_type: extracted.sourceType,
-            source_locator: extracted.sourceLocator,
+            source_type: chunk.sourceType,
+            source_locator: chunk.sourceLocator,
             text: chunk.text,
             updated_at: new Date().toISOString()
           }

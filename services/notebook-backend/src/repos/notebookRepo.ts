@@ -18,6 +18,22 @@ export type NotebookItemRow = {
   revision: number
   created_at: string
   updated_at: string
+  files?: NotebookItemFileRow[]
+}
+
+export type NotebookItemFileRow = {
+  id: string
+  item_id: string
+  company_id: string
+  owner_user_id: string
+  matrix_media_mxc: string
+  matrix_media_name: string | null
+  matrix_media_mime: string | null
+  matrix_media_size: number | null
+  is_indexable: boolean
+  status: 'active' | 'deleted'
+  created_at: string
+  updated_at: string
 }
 
 export type NotebookIndexJobRow = {
@@ -39,6 +55,13 @@ function mapNotebookItem(row: any): NotebookItemRow {
   return {
     ...row,
     revision: Number(row.revision)
+  }
+}
+
+function mapNotebookItemFile(row: any): NotebookItemFileRow {
+  return {
+    ...row,
+    matrix_media_size: row.matrix_media_size == null ? null : Number(row.matrix_media_size)
   }
 }
 
@@ -236,6 +259,167 @@ export async function updateNotebookItemByOwner(
   return result.rows[0] ? mapNotebookItem(result.rows[0]) : null
 }
 
+export async function listNotebookItemFilesByItemIds(
+  companyId: string,
+  ownerUserId: string,
+  itemIds: string[]
+): Promise<Map<string, NotebookItemFileRow[]>> {
+  const cleaned = Array.from(new Set(itemIds.map((id) => String(id || '').trim()).filter(Boolean)))
+  const byItem = new Map<string, NotebookItemFileRow[]>()
+  if (cleaned.length === 0) return byItem
+
+  const result = await dbQuery<any>(
+    `select id::text as id, item_id::text as item_id, company_id::text as company_id, owner_user_id::text as owner_user_id,
+            matrix_media_mxc, matrix_media_name, matrix_media_mime, matrix_media_size,
+            is_indexable, status::text as status, created_at::text as created_at, updated_at::text as updated_at
+       from public.notebook_item_files
+      where company_id = $1
+        and owner_user_id = $2
+        and status = 'active'
+        and item_id = any($3::uuid[])
+      order by created_at desc`,
+    [companyId, ownerUserId, cleaned]
+  )
+
+  for (const row of result.rows) {
+    const mapped = mapNotebookItemFile(row)
+    const current = byItem.get(mapped.item_id) || []
+    current.push(mapped)
+    byItem.set(mapped.item_id, current)
+  }
+  return byItem
+}
+
+export async function listNotebookItemFilesByItem(
+  companyId: string,
+  ownerUserId: string,
+  itemId: string
+): Promise<NotebookItemFileRow[]> {
+  const result = await dbQuery<any>(
+    `select id::text as id, item_id::text as item_id, company_id::text as company_id, owner_user_id::text as owner_user_id,
+            matrix_media_mxc, matrix_media_name, matrix_media_mime, matrix_media_size,
+            is_indexable, status::text as status, created_at::text as created_at, updated_at::text as updated_at
+       from public.notebook_item_files
+      where company_id = $1 and owner_user_id = $2 and item_id = $3 and status = 'active'
+      order by created_at desc`,
+    [companyId, ownerUserId, itemId]
+  )
+  return result.rows.map(mapNotebookItemFile)
+}
+
+export async function listActiveNotebookItemFilesByItem(
+  companyId: string,
+  itemId: string
+): Promise<NotebookItemFileRow[]> {
+  const result = await dbQuery<any>(
+    `select id::text as id, item_id::text as item_id, company_id::text as company_id, owner_user_id::text as owner_user_id,
+            matrix_media_mxc, matrix_media_name, matrix_media_mime, matrix_media_size,
+            is_indexable, status::text as status, created_at::text as created_at, updated_at::text as updated_at
+       from public.notebook_item_files
+      where company_id = $1 and item_id = $2 and status = 'active'
+      order by created_at desc`,
+    [companyId, itemId]
+  )
+  return result.rows.map(mapNotebookItemFile)
+}
+
+export async function createNotebookItemFile(params: {
+  itemId: string
+  companyId: string
+  ownerUserId: string
+  matrixMediaMxc: string
+  matrixMediaName: string | null
+  matrixMediaMime: string | null
+  matrixMediaSize: number | null
+  isIndexable: boolean
+}): Promise<NotebookItemFileRow> {
+  const result = await dbQuery<any>(
+    `insert into public.notebook_item_files (
+        item_id, company_id, owner_user_id, matrix_media_mxc, matrix_media_name, matrix_media_mime, matrix_media_size, is_indexable, status
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
+     returning id::text as id, item_id::text as item_id, company_id::text as company_id, owner_user_id::text as owner_user_id,
+               matrix_media_mxc, matrix_media_name, matrix_media_mime, matrix_media_size,
+               is_indexable, status::text as status, created_at::text as created_at, updated_at::text as updated_at`,
+    [
+      params.itemId,
+      params.companyId,
+      params.ownerUserId,
+      params.matrixMediaMxc,
+      params.matrixMediaName,
+      params.matrixMediaMime,
+      params.matrixMediaSize,
+      params.isIndexable
+    ]
+  )
+  return mapNotebookItemFile(result.rows[0])
+}
+
+export async function getNotebookItemFileByOwner(
+  companyId: string,
+  ownerUserId: string,
+  itemId: string,
+  fileId: string
+): Promise<NotebookItemFileRow | null> {
+  const result = await dbQuery<any>(
+    `select id::text as id, item_id::text as item_id, company_id::text as company_id, owner_user_id::text as owner_user_id,
+            matrix_media_mxc, matrix_media_name, matrix_media_mime, matrix_media_size,
+            is_indexable, status::text as status, created_at::text as created_at, updated_at::text as updated_at
+       from public.notebook_item_files
+      where company_id = $1 and owner_user_id = $2 and item_id = $3 and id = $4 and status = 'active'
+      limit 1`,
+    [companyId, ownerUserId, itemId, fileId]
+  )
+  return result.rows[0] ? mapNotebookItemFile(result.rows[0]) : null
+}
+
+export async function softDeleteNotebookItemFileByOwner(
+  companyId: string,
+  ownerUserId: string,
+  itemId: string,
+  fileId: string
+): Promise<boolean> {
+  const result = await dbQuery<any>(
+    `update public.notebook_item_files
+        set status = 'deleted'
+      where company_id = $1 and owner_user_id = $2 and item_id = $3 and id = $4 and status = 'active'
+      returning id`,
+    [companyId, ownerUserId, itemId, fileId]
+  )
+  return Number(result.rowCount || 0) > 0
+}
+
+export async function getLatestActiveNotebookItemFile(
+  companyId: string,
+  itemId: string
+): Promise<NotebookItemFileRow | null> {
+  const result = await dbQuery<any>(
+    `select id::text as id, item_id::text as item_id, company_id::text as company_id, owner_user_id::text as owner_user_id,
+            matrix_media_mxc, matrix_media_name, matrix_media_mime, matrix_media_size,
+            is_indexable, status::text as status, created_at::text as created_at, updated_at::text as updated_at
+       from public.notebook_item_files
+      where company_id = $1 and item_id = $2 and status = 'active'
+      order by created_at desc
+      limit 1`,
+    [companyId, itemId]
+  )
+  return result.rows[0] ? mapNotebookItemFile(result.rows[0]) : null
+}
+
+export async function syncNotebookItemPrimaryFileFromLatest(
+  companyId: string,
+  ownerUserId: string,
+  itemId: string
+): Promise<NotebookItemRow | null> {
+  const latest = await getLatestActiveNotebookItemFile(companyId, itemId)
+  return updateNotebookItemByOwner(companyId, ownerUserId, itemId, {
+    item_type: latest ? 'file' : 'text',
+    matrix_media_mxc: latest?.matrix_media_mxc || null,
+    matrix_media_name: latest?.matrix_media_name || null,
+    matrix_media_mime: latest?.matrix_media_mime || null,
+    matrix_media_size: latest?.matrix_media_size ?? null
+  })
+}
+
 export async function createIndexJob(params: {
   companyId: string
   ownerUserId: string
@@ -353,9 +537,14 @@ export async function replaceItemChunks(params: {
   itemId: string
   companyId: string
   ownerUserId: string
-  sourceType: string
-  sourceLocator: string | null
-  chunks: Array<{ chunkIndex: number; text: string; tokenCount: number; contentHash: string }>
+  chunks: Array<{
+    chunkIndex: number
+    text: string
+    tokenCount: number
+    contentHash: string
+    sourceType: string
+    sourceLocator: string | null
+  }>
 }) {
   await dbQuery(
     `delete from public.notebook_chunks
@@ -380,8 +569,8 @@ export async function replaceItemChunks(params: {
       chunk.text,
       chunk.tokenCount,
       chunk.contentHash,
-      params.sourceType,
-      params.sourceLocator
+      chunk.sourceType,
+      chunk.sourceLocator
     )
     tuples.push(`($${cursor}, $${cursor + 1}, $${cursor + 2}, $${cursor + 3}, $${cursor + 4}, $${cursor + 5}, $${cursor + 6}, $${cursor + 7}, $${cursor + 8})`)
     cursor += 9

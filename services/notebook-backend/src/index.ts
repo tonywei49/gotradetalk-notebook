@@ -7,9 +7,11 @@ import {
   assistQuery,
   attachNotebookFile,
   createNotebookItem,
+  deleteNotebookItemFile,
   deleteNotebookItem,
   getMeCapabilities,
   getNotebookIndexStatus,
+  listNotebookItemFiles,
   listNotebookItems,
   retryNotebookIndexJob,
   syncPull,
@@ -61,6 +63,8 @@ app.post('/notebook/items', requireHubUser, createNotebookItem)
 app.patch('/notebook/items/:id', requireHubUser, updateNotebookItem)
 app.delete('/notebook/items/:id', requireHubUser, deleteNotebookItem)
 app.post('/notebook/items/:id/files', requireHubUser, attachNotebookFile)
+app.get('/notebook/items/:id/files', requireHubUser, listNotebookItemFiles)
+app.delete('/notebook/items/:id/files/:fileId', requireHubUser, deleteNotebookItemFile)
 app.get('/notebook/items/:id/index-status', requireHubUser, getNotebookIndexStatus)
 app.post('/notebook/index/jobs/:id/retry', requireHubUser, retryNotebookIndexJob)
 

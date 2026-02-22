@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { createNotebookItem as repoCreateNotebookItem, getIndexJobByOwner, getLatestIndexJobByItem, getNotebookItemByOwner, getSyncOpByClientOpId, insertAssistLog, listNotebookItems as repoListNotebookItems, listNotebookItemsAfterCursor, markIndexJobPending, updateNotebookItemByOwner, createSyncOp, updateSyncOpStatus } from '../repos/notebookRepo.js';
+import { createNotebookItemFile, createNotebookItem as repoCreateNotebookItem, getLatestActiveNotebookItemFile, getNotebookItemFileByOwner, getIndexJobByOwner, getLatestIndexJobByItem, getNotebookItemByOwner, getSyncOpByClientOpId, insertAssistLog, listNotebookItemFilesByItem, listNotebookItemFilesByItemIds, listNotebookItems as repoListNotebookItems, listNotebookItemsAfterCursor, markIndexJobPending, softDeleteNotebookItemFileByOwner, syncNotebookItemPrimaryFileFromLatest, updateNotebookItemByOwner, createSyncOp, updateSyncOpStatus } from '../repos/notebookRepo.js';
 import { ensureAssistAllowed, ensureNotebookBasic, resolveNotebookAccessContext, sendNotebookError } from '../services/notebookAuth.js';
 import { enqueueNotebookIndexJob, hybridSearchNotebook } from '../services/notebookIndexing.js';
 import { generateAssistAnswer, getNotebookAiConfig } from '../services/notebookLlm.js';
@@ -26,6 +26,16 @@ function encodeCursor(updatedAt, id) {
 }
 function isUuid(value) {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+async function withItemFiles(context, item) {
+    if (!item)
+        return null;
+    const files = await listNotebookItemFilesByItem(context.companyId, context.userId, item.id);
+    return { ...item, files };
+}
+async function withItemsFiles(context, items) {
+    const byItem = await listNotebookItemFilesByItemIds(context.companyId, context.userId, items.map((item) => item.id));
+    return items.map((item) => ({ ...item, files: byItem.get(item.id) || [] }));
 }
 async function getContextMessages(req, roomId, anchorEventId, windowSize = 5) {
     const token = getBearerToken(req);
@@ -87,9 +97,10 @@ export async function listNotebookItems(req, res) {
         });
         const hasMore = rows.length > limit;
         const items = hasMore ? rows.slice(0, limit) : rows;
+        const withFiles = await withItemsFiles(context, items);
         const last = items[items.length - 1];
         return res.json({
-            items,
+            items: withFiles,
             next_cursor: hasMore && last ? encodeCursor(String(last.updated_at), String(last.id)) : null
         });
     }
@@ -125,7 +136,7 @@ export async function createNotebookItem(req, res) {
                 jobType: 'upsert'
             });
         }
-        return res.status(201).json({ item });
+        return res.status(201).json({ item: await withItemFiles(context, item) });
     }
     catch (error) {
         return sendNotebookError(res, 500, 'INTERNAL_ERROR', error?.message || 'CREATE_FAILED');
@@ -173,7 +184,7 @@ export async function updateNotebookItem(req, res) {
             itemId: id,
             jobType: shouldIndex ? 'upsert' : 'delete'
         });
-        return res.json({ item, conflict: false });
+        return res.json({ item: await withItemFiles(context, item), conflict: false });
     }
     catch (error) {
         return sendNotebookError(res, 500, 'INTERNAL_ERROR', error?.message || 'UPDATE_FAILED');
@@ -229,20 +240,32 @@ export async function attachNotebookFile(req, res) {
     if (!isSupported && body.is_indexable) {
         return sendNotebookError(res, 400, 'UNSUPPORTED_FILE_TYPE');
     }
+    const existing = await getNotebookItemByOwner(context.companyId, context.userId, id);
+    if (!existing) {
+        return sendNotebookError(res, 404, 'NOT_FOUND');
+    }
+    await createNotebookItemFile({
+        itemId: id,
+        companyId: context.companyId,
+        ownerUserId: context.userId,
+        matrixMediaMxc,
+        matrixMediaName: body.matrix_media_name || null,
+        matrixMediaMime: body.matrix_media_mime || null,
+        matrixMediaSize: body.matrix_media_size || null,
+        isIndexable: body.is_indexable !== false
+    });
     const item = await updateNotebookItemByOwner(context.companyId, context.userId, id, {
         item_type: 'file',
-        matrix_media_mxc: matrixMediaMxc,
-        matrix_media_name: body.matrix_media_name || null,
-        matrix_media_mime: body.matrix_media_mime || null,
-        matrix_media_size: body.matrix_media_size || null,
-        is_indexable: Boolean(body.is_indexable),
-        index_status: body.is_indexable ? 'pending' : 'skipped',
-        index_error: null
+        is_indexable: body.is_indexable !== false,
+        index_status: body.is_indexable === false ? 'skipped' : 'pending',
+        index_error: null,
+        revision: Number(existing.revision) + 1
     });
     if (!item) {
         return sendNotebookError(res, 404, 'NOT_FOUND');
     }
-    const indexJobType = body.is_indexable ? 'upsert' : 'delete';
+    await syncNotebookItemPrimaryFileFromLatest(context.companyId, context.userId, id);
+    const indexJobType = body.is_indexable === false ? 'delete' : 'upsert';
     await enqueueNotebookIndexJob({
         companyId: context.companyId,
         ownerUserId: context.userId,
@@ -250,7 +273,63 @@ export async function attachNotebookFile(req, res) {
         jobType: indexJobType
     });
     const indexJob = await getLatestIndexJobByItem(context.companyId, id);
-    return res.status(202).json({ item, index_job: indexJob || null });
+    return res.status(202).json({ item: await withItemFiles(context, item), index_job: indexJob || null });
+}
+export async function listNotebookItemFiles(req, res) {
+    const context = await resolveNotebookAccessContext(req);
+    if (!context)
+        return sendNotebookError(res, 401, 'UNAUTHORIZED');
+    if (!ensureNotebookBasic(context, res))
+        return;
+    const id = String(req.params.id || '').trim();
+    if (!id)
+        return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id');
+    const item = await getNotebookItemByOwner(context.companyId, context.userId, id);
+    if (!item)
+        return sendNotebookError(res, 404, 'NOT_FOUND');
+    const files = await listNotebookItemFilesByItem(context.companyId, context.userId, id);
+    return res.json({ item_id: id, files });
+}
+export async function deleteNotebookItemFile(req, res) {
+    const context = await resolveNotebookAccessContext(req);
+    if (!context)
+        return sendNotebookError(res, 401, 'UNAUTHORIZED');
+    if (!ensureNotebookBasic(context, res))
+        return;
+    const id = String(req.params.id || '').trim();
+    const fileId = String(req.params.fileId || '').trim();
+    if (!id || !fileId)
+        return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id or fileId');
+    const item = await getNotebookItemByOwner(context.companyId, context.userId, id);
+    if (!item)
+        return sendNotebookError(res, 404, 'NOT_FOUND');
+    const target = await getNotebookItemFileByOwner(context.companyId, context.userId, id, fileId);
+    if (!target)
+        return sendNotebookError(res, 404, 'NOT_FOUND');
+    const deleted = await softDeleteNotebookItemFileByOwner(context.companyId, context.userId, id, fileId);
+    if (!deleted)
+        return sendNotebookError(res, 404, 'NOT_FOUND');
+    const latest = await getLatestActiveNotebookItemFile(context.companyId, id);
+    const updated = await updateNotebookItemByOwner(context.companyId, context.userId, id, {
+        item_type: latest ? 'file' : 'text',
+        matrix_media_mxc: latest?.matrix_media_mxc || null,
+        matrix_media_name: latest?.matrix_media_name || null,
+        matrix_media_mime: latest?.matrix_media_mime || null,
+        matrix_media_size: latest?.matrix_media_size ?? null,
+        is_indexable: latest ? latest.is_indexable : false,
+        index_status: latest?.is_indexable ? 'pending' : 'skipped',
+        index_error: null,
+        revision: Number(item.revision) + 1
+    });
+    if (!updated)
+        return sendNotebookError(res, 404, 'NOT_FOUND');
+    await enqueueNotebookIndexJob({
+        companyId: context.companyId,
+        ownerUserId: context.userId,
+        itemId: id,
+        jobType: latest?.is_indexable ? 'upsert' : 'delete'
+    });
+    return res.status(202).json({ ok: true, item: await withItemFiles(context, updated) });
 }
 export async function getNotebookIndexStatus(req, res) {
     const context = await resolveNotebookAccessContext(req);
