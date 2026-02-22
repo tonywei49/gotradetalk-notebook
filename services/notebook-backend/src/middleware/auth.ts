@@ -179,52 +179,40 @@ export async function requireHubUser(req: Request, res: Response, next: NextFunc
     })
   }
 
-  if (isSupabaseAuthConfigured && supabaseAdmin) {
-    const { data, error } = await supabaseAdmin.auth.getUser(token)
-    if (!error && data.user) {
-      let profile = await getProfileByAuthUserIdOrId(data.user.id)
-      if (profile && !String(profile.company_id || '').trim()) {
-        profile = null
-      }
-      if (!profile) {
-        const syncedUserId = await syncProfileFromHub(req, token).catch(() => null)
-        if (syncedUserId) {
-          profile = await getProfileById(syncedUserId)
-        }
-      }
-      const resolvedUserId = profile?.id || data.user.id
-      const memberships = await listMembershipsByUserId(resolvedUserId)
+  if (!isSupabaseAuthConfigured || !supabaseAdmin) {
+    return authNotConfigured(res)
+  }
 
-      const requestUser: RequestUser = {
-        id: resolvedUserId,
-        email: data.user.email ?? undefined,
-        userType: profile?.user_type,
-        isEmployee: memberships.length > 0 || profile?.user_type === 'staff',
-        memberships
-      }
+  const { data, error } = await supabaseAdmin.auth.getUser(token)
+  if (error || !data.user) {
+    return res.status(401).json({
+      code: 'INVALID_AUTH_TOKEN',
+      message: 'Invalid auth token'
+    })
+  }
 
-      ;(req as any).user = requestUser
-      return next()
+  let profile = await getProfileByAuthUserIdOrId(data.user.id)
+  if (profile && !String(profile.company_id || '').trim()) {
+    profile = null
+  }
+  if (!profile) {
+    const syncedUserId = await syncProfileFromHub(req, token).catch(() => null)
+    if (syncedUserId) {
+      profile = await getProfileById(syncedUserId)
     }
   }
 
-  // Fallback path: validate hub/supabase JWT via hub /me and bootstrap local profile context.
-  // This avoids rejecting valid business JWTs when local supabase admin validation is out of sync.
-  const syncedUserId = await syncProfileFromHub(req, token).catch(() => null)
-  if (syncedUserId) {
-    const profile = await getProfileById(syncedUserId)
-    const memberships = await listMembershipsByUserId(syncedUserId)
-    const requestUser: RequestUser = {
-      id: syncedUserId,
-      userType: profile?.user_type,
-      isEmployee: memberships.length > 0 || profile?.user_type === 'staff',
-      memberships
-    }
-    ;(req as any).user = requestUser
-    return next()
+  const resolvedUserId = profile?.id || data.user.id
+  const memberships = await listMembershipsByUserId(resolvedUserId)
+
+  const requestUser: RequestUser = {
+    id: resolvedUserId,
+    email: data.user.email ?? undefined,
+    userType: profile?.user_type,
+    isEmployee: memberships.length > 0 || profile?.user_type === 'staff',
+    memberships
   }
-  return res.status(401).json({
-    code: 'INVALID_AUTH_TOKEN',
-    message: 'Invalid auth token'
-  })
+
+  ;(req as any).user = requestUser
+  return next()
 }
