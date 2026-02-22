@@ -660,6 +660,61 @@ export async function getNotebookItemTitles(companyId: string, ownerUserId: stri
   return new Map(result.rows.map((row) => [row.id, row.title]))
 }
 
+export type NotebookChunkRow = {
+  id: string
+  item_id: string
+  chunk_index: number
+  chunk_text: string
+  token_count: number | null
+  source_type: string | null
+  source_locator: string | null
+  created_at: string
+  updated_at: string
+}
+
+function mapNotebookChunk(row: any): NotebookChunkRow {
+  return {
+    ...row,
+    chunk_index: Number(row.chunk_index),
+    token_count: row.token_count == null ? null : Number(row.token_count)
+  }
+}
+
+export async function listNotebookChunksByItem(params: {
+  companyId: string
+  ownerUserId: string
+  itemId: string
+  limit: number
+}): Promise<NotebookChunkRow[]> {
+  const result = await dbQuery<any>(
+    `select id::text as id, item_id::text as item_id, chunk_index, chunk_text, token_count,
+            source_type, source_locator, created_at::text as created_at, updated_at::text as updated_at
+       from public.notebook_chunks
+      where company_id = $1 and owner_user_id = $2 and item_id = $3
+      order by chunk_index asc
+      limit $4`,
+    [params.companyId, params.ownerUserId, params.itemId, params.limit]
+  )
+  return result.rows.map(mapNotebookChunk)
+}
+
+export async function getNotebookChunkStatsByItem(params: {
+  companyId: string
+  ownerUserId: string
+  itemId: string
+}): Promise<{ chunk_count: number; total_chars: number; total_tokens: number }> {
+  const result = await dbQuery<any>(
+    `select
+        count(*)::int as chunk_count,
+        coalesce(sum(length(chunk_text)), 0)::int as total_chars,
+        coalesce(sum(token_count), 0)::int as total_tokens
+       from public.notebook_chunks
+      where company_id = $1 and owner_user_id = $2 and item_id = $3`,
+    [params.companyId, params.ownerUserId, params.itemId]
+  )
+  return result.rows[0] || { chunk_count: 0, total_chars: 0, total_tokens: 0 }
+}
+
 export async function insertAssistLog(params: {
   companyId: string
   userId: string

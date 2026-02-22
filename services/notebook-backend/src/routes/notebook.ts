@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import {
   createNotebookItemFile,
   createNotebookItem as repoCreateNotebookItem,
+  getNotebookChunkStatsByItem,
   getLatestActiveNotebookItemFile,
   getNotebookItemFileByOwner,
   getIndexJobByOwner,
@@ -12,6 +13,7 @@ import {
   insertAssistLog,
   listNotebookItemFilesByItem,
   listNotebookItemFilesByItemIds,
+  listNotebookChunksByItem,
   listNotebookItems as repoListNotebookItems,
   listNotebookItemsAfterCursor,
   markIndexJobPending,
@@ -424,6 +426,85 @@ export async function getNotebookIndexStatus(req: Request, res: Response) {
   if (!item) return sendNotebookError(res, 404, 'NOT_FOUND')
 
   return res.json({ item_id: item.id, index_status: item.index_status, index_error: item.index_error || null })
+}
+
+export async function getNotebookItemParsedPreview(req: Request, res: Response) {
+  const context = await resolveNotebookAccessContext(req)
+  if (!context) return sendNotebookError(res, 401, 'UNAUTHORIZED')
+  if (!ensureNotebookBasic(context, res)) return
+
+  const id = String(req.params.id || '').trim()
+  if (!id) return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id')
+
+  const item = await getNotebookItemByOwner(context.companyId, context.userId, id)
+  if (!item) return sendNotebookError(res, 404, 'NOT_FOUND')
+
+  const limit = Math.min(Math.max(Number(req.query.limit || 8), 1), 50)
+  const chars = Math.min(Math.max(Number(req.query.chars || 6000), 500), 40000)
+  const chunks = await listNotebookChunksByItem({
+    companyId: context.companyId,
+    ownerUserId: context.userId,
+    itemId: id,
+    limit
+  })
+  const stats = await getNotebookChunkStatsByItem({
+    companyId: context.companyId,
+    ownerUserId: context.userId,
+    itemId: id
+  })
+
+  const parsedText = chunks
+    .map((chunk) => String(chunk.chunk_text || '').trim())
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(0, chars)
+
+  return res.json({
+    item_id: id,
+    index_status: item.index_status,
+    index_error: item.index_error || null,
+    preview: {
+      text: parsedText,
+      truncated: parsedText.length >= chars,
+      chunk_count_sampled: chunks.length,
+      chunk_count_total: Number(stats.chunk_count || 0),
+      total_chars: Number(stats.total_chars || 0),
+      total_tokens: Number(stats.total_tokens || 0)
+    }
+  })
+}
+
+export async function getNotebookItemChunks(req: Request, res: Response) {
+  const context = await resolveNotebookAccessContext(req)
+  if (!context) return sendNotebookError(res, 401, 'UNAUTHORIZED')
+  if (!ensureNotebookBasic(context, res)) return
+
+  const id = String(req.params.id || '').trim()
+  if (!id) return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id')
+
+  const item = await getNotebookItemByOwner(context.companyId, context.userId, id)
+  if (!item) return sendNotebookError(res, 404, 'NOT_FOUND')
+
+  const limit = Math.min(Math.max(Number(req.query.limit || 120), 1), 400)
+  const chunks = await listNotebookChunksByItem({
+    companyId: context.companyId,
+    ownerUserId: context.userId,
+    itemId: id,
+    limit
+  })
+  const stats = await getNotebookChunkStatsByItem({
+    companyId: context.companyId,
+    ownerUserId: context.userId,
+    itemId: id
+  })
+
+  return res.json({
+    item_id: id,
+    index_status: item.index_status,
+    index_error: item.index_error || null,
+    chunks,
+    total: Number(stats.chunk_count || 0)
+  })
 }
 
 export async function retryNotebookIndexJob(req: Request, res: Response) {
