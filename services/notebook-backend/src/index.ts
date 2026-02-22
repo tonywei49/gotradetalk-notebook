@@ -49,7 +49,7 @@ app.use(cors({
     return callback(new Error('Not allowed by CORS'))
   },
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Authorization', 'Content-Type', 'X-HS-URL', 'X-Matrix-User-Id'],
+  allowedHeaders: ['Authorization', 'Content-Type', 'X-HS-URL', 'X-Matrix-User-Id', 'X-Matrix-Access-Token'],
   optionsSuccessStatus: 204,
   credentials: true
 }))

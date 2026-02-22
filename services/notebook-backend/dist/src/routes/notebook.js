@@ -10,6 +10,9 @@ function getBearerToken(req) {
     }
     return '';
 }
+function getMatrixContextToken(req) {
+    return String(req.headers['x-matrix-access-token'] || req.query.matrix_access_token || '').trim();
+}
 function getMatrixBaseUrl(req) {
     return String(req.query.hs_url || req.headers['x-hs-url'] || '').trim();
 }
@@ -38,7 +41,7 @@ async function withItemsFiles(context, items) {
     return items.map((item) => ({ ...item, files: byItem.get(item.id) || [] }));
 }
 async function getContextMessages(req, roomId, anchorEventId, windowSize = 5) {
-    const token = getBearerToken(req);
+    const token = getMatrixContextToken(req);
     const hsUrl = getMatrixBaseUrl(req);
     if (!token || !hsUrl) {
         throw new Error('INVALID_CONTEXT');

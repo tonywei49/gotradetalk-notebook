@@ -40,6 +40,10 @@ function getBearerToken(req: Request) {
   return ''
 }
 
+function getMatrixContextToken(req: Request) {
+  return String(req.headers['x-matrix-access-token'] || req.query.matrix_access_token || '').trim()
+}
+
 function getMatrixBaseUrl(req: Request) {
   return String(req.query.hs_url || req.headers['x-hs-url'] || '').trim()
 }
@@ -71,7 +75,7 @@ async function withItemsFiles<T extends { id: string }>(context: { companyId: st
 }
 
 async function getContextMessages(req: Request, roomId: string, anchorEventId: string, windowSize = 5) {
-  const token = getBearerToken(req)
+  const token = getMatrixContextToken(req)
   const hsUrl = getMatrixBaseUrl(req)
   if (!token || !hsUrl) {
     throw new Error('INVALID_CONTEXT')
