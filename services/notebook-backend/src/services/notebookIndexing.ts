@@ -68,6 +68,14 @@ export async function runNotebookIndexJob(jobId: string, options?: { matrixBaseU
           baseUrl: aiConfig.ocrBaseUrl,
           apiKey: aiConfig.ocrApiKey,
           model: aiConfig.ocrModel
+        },
+        vision: {
+          baseUrl: aiConfig.visionBaseUrl,
+          apiKey: aiConfig.visionApiKey,
+          model: aiConfig.visionModel,
+          fallbackBaseUrl: aiConfig.chatBaseUrl,
+          fallbackApiKey: aiConfig.chatApiKey,
+          fallbackModel: aiConfig.chatModel
         }
       })
       let chunkIndexOffset = 0

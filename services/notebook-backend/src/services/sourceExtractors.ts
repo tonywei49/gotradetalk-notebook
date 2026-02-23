@@ -1,5 +1,6 @@
 import { fetchMatrixMediaBuffer, parseDocument } from './notebookParsing.js'
 import { runImageOcr } from './ocrPipeline.js'
+import { runImageVisionCaption } from './visionPipeline.js'
 
 export type IndexItemRow = {
   id: string
@@ -42,6 +43,14 @@ async function extractSingleFileSource(params: {
     apiKey: string
     model: string | null
   }
+  vision: {
+    baseUrl: string
+    apiKey: string
+    model: string | null
+    fallbackBaseUrl: string
+    fallbackApiKey: string
+    fallbackModel: string | null
+  }
 }) {
   const file = params.file
   if (!file.matrix_media_mxc || !params.matrixBaseUrl) {
@@ -57,8 +66,42 @@ async function extractSingleFileSource(params: {
       config: params.ocr
     })
 
+    let visionCaption: string | null = null
+    try {
+      visionCaption = await runImageVisionCaption({
+        image: media,
+        mimeType: String(file.matrix_media_mime || 'image/jpeg'),
+        fileName: file.matrix_media_name,
+        config: {
+          baseUrl: params.vision.baseUrl,
+          apiKey: params.vision.apiKey,
+          model: params.vision.model
+        }
+      })
+
+      if (!visionCaption) {
+        visionCaption = await runImageVisionCaption({
+          image: media,
+          mimeType: String(file.matrix_media_mime || 'image/jpeg'),
+          fileName: file.matrix_media_name,
+          config: {
+            baseUrl: params.vision.fallbackBaseUrl,
+            apiKey: params.vision.fallbackApiKey,
+            model: params.vision.fallbackModel
+          }
+        })
+      }
+    } catch {
+      visionCaption = null
+    }
+
+    const combinedText = [
+      ocrResult.text ? `OCR:\n${ocrResult.text}` : '',
+      visionCaption ? `Vision:\n${visionCaption}` : ''
+    ].filter(Boolean).join('\n\n')
+
     return {
-      text: ocrResult.text,
+      text: combinedText || ocrResult.text,
       sourceType: 'image_ocr',
       sourceLocator: file.matrix_media_name || file.matrix_media_mxc
     }
@@ -83,6 +126,14 @@ export async function extractItemSources(params: {
     apiKey: string
     model: string | null
   }
+  vision: {
+    baseUrl: string
+    apiKey: string
+    model: string | null
+    fallbackBaseUrl: string
+    fallbackApiKey: string
+    fallbackModel: string | null
+  }
 }) {
   const item = params.item
 
@@ -101,7 +152,8 @@ export async function extractItemSources(params: {
         file,
         matrixBaseUrl: params.matrixBaseUrl,
         accessToken: params.accessToken,
-        ocr: params.ocr
+        ocr: params.ocr,
+        vision: params.vision
       }))
     }
     return outputs
@@ -121,7 +173,8 @@ export async function extractItemSources(params: {
     },
     matrixBaseUrl: params.matrixBaseUrl,
     accessToken: params.accessToken,
-    ocr: params.ocr
+    ocr: params.ocr,
+    vision: params.vision
   })
   return [fallback]
 }

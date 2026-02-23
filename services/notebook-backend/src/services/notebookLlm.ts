@@ -4,6 +4,7 @@ const NOTEBOOK_AI_DEFAULT_BASE_URL = 'https://api.siliconflow.cn'
 const NOTEBOOK_AI_DEFAULT_EMBEDDING_MODEL = 'Qwen/Qwen3-Embedding-8B'
 const NOTEBOOK_AI_DEFAULT_RERANK_MODEL = 'BAAI/bge-reranker-v2-m3'
 const NOTEBOOK_AI_DEFAULT_OCR_MODEL = 'PaddlePaddle/PaddleOCR-VL-1.5'
+const NOTEBOOK_AI_DEFAULT_VISION_MODEL = ''
 
 export type NotebookAiConfig = {
   enabled: boolean
@@ -15,10 +16,13 @@ export type NotebookAiConfig = {
   rerankApiKey: string
   ocrBaseUrl: string
   ocrApiKey: string
+  visionBaseUrl: string
+  visionApiKey: string
   chatModel: string
   embeddingModel: string
   rerankModel: string | null
   ocrModel: string | null
+  visionModel: string | null
   ocrEnabled: boolean
   topK: number
   scoreThreshold: number
@@ -78,12 +82,17 @@ export async function getNotebookAiConfig(companyId: string): Promise<NotebookAi
     rerankApiKey: String(data?.notebook_ai_rerank_api_key || ''),
     ocrBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_ocr_base_url || defaultBaseUrl)),
     ocrApiKey: String(data?.notebook_ai_ocr_api_key || ''),
+    visionBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_vision_base_url || data?.notebook_ai_chat_base_url || defaultBaseUrl)),
+    visionApiKey: String(data?.notebook_ai_vision_api_key || data?.notebook_ai_chat_api_key || ''),
     chatModel: String(data?.notebook_ai_chat_model || 'gpt-4o-mini'),
     embeddingModel: String(data?.notebook_ai_embedding_model || NOTEBOOK_AI_DEFAULT_EMBEDDING_MODEL),
     rerankModel: data?.notebook_ai_rerank_model
       ? String(data.notebook_ai_rerank_model)
       : NOTEBOOK_AI_DEFAULT_RERANK_MODEL,
     ocrModel: data?.notebook_ai_ocr_model ? String(data.notebook_ai_ocr_model) : NOTEBOOK_AI_DEFAULT_OCR_MODEL,
+    visionModel: data?.notebook_ai_vision_model
+      ? String(data.notebook_ai_vision_model)
+      : (data?.notebook_ai_chat_model ? String(data.notebook_ai_chat_model) : NOTEBOOK_AI_DEFAULT_VISION_MODEL) || null,
     ocrEnabled: Boolean(data?.notebook_ai_ocr_enabled),
     topK: Number(data?.notebook_ai_retrieval_top_k || 5),
     scoreThreshold: Number(data?.notebook_ai_score_threshold || 0.35),
