@@ -1,4 +1,5 @@
 import { getCompanySettings } from '../repos/authRepo.js'
+import { getPlatformCapabilityConfig, resolveAiRuntimePolicy } from './aiRuntimePolicy.js'
 
 const NOTEBOOK_AI_DEFAULT_BASE_URL = 'https://api.siliconflow.cn'
 const NOTEBOOK_AI_DEFAULT_EMBEDDING_MODEL = 'Qwen/Qwen3-Embedding-8B'
@@ -69,35 +70,75 @@ function normalizeBaseUrl(value: string) {
 }
 
 export async function getNotebookAiConfig(companyId: string): Promise<NotebookAiConfig> {
+  const runtimePolicy = await resolveAiRuntimePolicy({
+    subjectType: 'company',
+    subjectId: companyId,
+    capabilityType: 'notebook_ai'
+  })
+  if (runtimePolicy.rejectionCode) {
+    throw new Error(runtimePolicy.rejectionCode)
+  }
+
   const data = await getCompanySettings(companyId)
+  const platformConfig = await getPlatformCapabilityConfig('notebook_ai')
   const defaultBaseUrl = normalizeBaseUrl(NOTEBOOK_AI_DEFAULT_BASE_URL)
+  const getConfigValue = (...keys: string[]) => {
+    for (const key of keys) {
+      const value = (platformConfig as any)?.[key]
+      if (value !== undefined && value !== null && String(value).trim() !== '') return value
+    }
+    return undefined
+  }
+  if (Object.keys(platformConfig).length === 0) {
+    console.warn('[notebook-llm] missing platform_ai_settings.notebook_ai config; fallback to company_settings')
+  }
 
   return {
-    enabled: Boolean(data?.notebook_ai_enabled),
-    chatBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_chat_base_url || defaultBaseUrl)),
-    chatApiKey: String(data?.notebook_ai_chat_api_key || ''),
-    embeddingBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_embedding_base_url || defaultBaseUrl)),
-    embeddingApiKey: String(data?.notebook_ai_embedding_api_key || ''),
-    rerankBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_rerank_base_url || defaultBaseUrl)),
-    rerankApiKey: String(data?.notebook_ai_rerank_api_key || ''),
-    ocrBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_ocr_base_url || defaultBaseUrl)),
-    ocrApiKey: String(data?.notebook_ai_ocr_api_key || ''),
-    visionBaseUrl: normalizeBaseUrl(String(data?.notebook_ai_vision_base_url || data?.notebook_ai_chat_base_url || defaultBaseUrl)),
-    visionApiKey: String(data?.notebook_ai_vision_api_key || data?.notebook_ai_chat_api_key || ''),
-    chatModel: String(data?.notebook_ai_chat_model || 'gpt-4o-mini'),
-    embeddingModel: String(data?.notebook_ai_embedding_model || NOTEBOOK_AI_DEFAULT_EMBEDDING_MODEL),
-    rerankModel: data?.notebook_ai_rerank_model
+    enabled: true,
+    chatBaseUrl: normalizeBaseUrl(String(getConfigValue('chat_base_url', 'notebook_ai_chat_base_url') || data?.notebook_ai_chat_base_url || defaultBaseUrl)),
+    chatApiKey: String(getConfigValue('chat_api_key', 'notebook_ai_chat_api_key') || data?.notebook_ai_chat_api_key || ''),
+    embeddingBaseUrl: normalizeBaseUrl(String(getConfigValue('embedding_base_url', 'notebook_ai_embedding_base_url') || data?.notebook_ai_embedding_base_url || defaultBaseUrl)),
+    embeddingApiKey: String(getConfigValue('embedding_api_key', 'notebook_ai_embedding_api_key') || data?.notebook_ai_embedding_api_key || ''),
+    rerankBaseUrl: normalizeBaseUrl(String(getConfigValue('rerank_base_url', 'notebook_ai_rerank_base_url') || data?.notebook_ai_rerank_base_url || defaultBaseUrl)),
+    rerankApiKey: String(getConfigValue('rerank_api_key', 'notebook_ai_rerank_api_key') || data?.notebook_ai_rerank_api_key || ''),
+    ocrBaseUrl: normalizeBaseUrl(String(getConfigValue('ocr_base_url', 'notebook_ai_ocr_base_url') || data?.notebook_ai_ocr_base_url || defaultBaseUrl)),
+    ocrApiKey: String(getConfigValue('ocr_api_key', 'notebook_ai_ocr_api_key') || data?.notebook_ai_ocr_api_key || ''),
+    visionBaseUrl: normalizeBaseUrl(String(
+      getConfigValue('vision_base_url', 'notebook_ai_vision_base_url')
+      || getConfigValue('chat_base_url', 'notebook_ai_chat_base_url')
+      || data?.notebook_ai_vision_base_url
+      || data?.notebook_ai_chat_base_url
+      || defaultBaseUrl
+    )),
+    visionApiKey: String(
+      getConfigValue('vision_api_key', 'notebook_ai_vision_api_key')
+      || getConfigValue('chat_api_key', 'notebook_ai_chat_api_key')
+      || data?.notebook_ai_vision_api_key
+      || data?.notebook_ai_chat_api_key
+      || ''
+    ),
+    chatModel: String(getConfigValue('chat_model', 'notebook_ai_chat_model') || data?.notebook_ai_chat_model || 'gpt-4o-mini'),
+    embeddingModel: String(getConfigValue('embedding_model', 'notebook_ai_embedding_model') || data?.notebook_ai_embedding_model || NOTEBOOK_AI_DEFAULT_EMBEDDING_MODEL),
+    rerankModel: getConfigValue('rerank_model', 'notebook_ai_rerank_model')
+      ? String(getConfigValue('rerank_model', 'notebook_ai_rerank_model'))
+      : data?.notebook_ai_rerank_model
       ? String(data.notebook_ai_rerank_model)
       : NOTEBOOK_AI_DEFAULT_RERANK_MODEL,
-    ocrModel: data?.notebook_ai_ocr_model ? String(data.notebook_ai_ocr_model) : NOTEBOOK_AI_DEFAULT_OCR_MODEL,
-    visionModel: data?.notebook_ai_vision_model
+    ocrModel: getConfigValue('ocr_model', 'notebook_ai_ocr_model')
+      ? String(getConfigValue('ocr_model', 'notebook_ai_ocr_model'))
+      : data?.notebook_ai_ocr_model
+      ? String(data.notebook_ai_ocr_model)
+      : NOTEBOOK_AI_DEFAULT_OCR_MODEL,
+    visionModel: getConfigValue('vision_model', 'notebook_ai_vision_model')
+      ? String(getConfigValue('vision_model', 'notebook_ai_vision_model'))
+      : data?.notebook_ai_vision_model
       ? String(data.notebook_ai_vision_model)
       : (data?.notebook_ai_chat_model ? String(data.notebook_ai_chat_model) : NOTEBOOK_AI_DEFAULT_VISION_MODEL) || null,
-    ocrEnabled: Boolean(data?.notebook_ai_ocr_enabled),
-    topK: Number(data?.notebook_ai_retrieval_top_k || 5),
-    scoreThreshold: Number(data?.notebook_ai_score_threshold || 0.35),
-    maxContextTokens: Number(data?.notebook_ai_max_context_tokens || 4096),
-    allowLowConfidenceSend: Boolean(data?.notebook_ai_allow_low_confidence_send)
+    ocrEnabled: Boolean(getConfigValue('ocr_enabled', 'notebook_ai_ocr_enabled') ?? data?.notebook_ai_ocr_enabled),
+    topK: Number(getConfigValue('retrieval_top_k', 'notebook_ai_retrieval_top_k') || data?.notebook_ai_retrieval_top_k || 5),
+    scoreThreshold: Number(getConfigValue('score_threshold', 'notebook_ai_score_threshold') || data?.notebook_ai_score_threshold || 0.35),
+    maxContextTokens: Number(getConfigValue('max_context_tokens', 'notebook_ai_max_context_tokens') || data?.notebook_ai_max_context_tokens || 4096),
+    allowLowConfidenceSend: Boolean(getConfigValue('allow_low_confidence_send', 'notebook_ai_allow_low_confidence_send') ?? data?.notebook_ai_allow_low_confidence_send)
   }
 }
 

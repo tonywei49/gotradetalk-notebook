@@ -22,6 +22,12 @@ import {
   updateNotebookItem
 } from './routes/notebook.js'
 import { getInternalNotebookAiSettings, upsertInternalNotebookAiSettings } from './routes/internalNotebookSettings.js'
+import {
+  getCompanyNotebookAiSettings,
+  getCompanyTranslationSettings,
+  rejectManagedNotebookAiUpdate,
+  rejectManagedTranslationUpdate
+} from './routes/companySettings.js'
 
 const app = express()
 const port = Number(process.env.PORT || 4010)
@@ -60,6 +66,11 @@ app.get('/health', (_req, res) => res.json({ ok: true }))
 app.get('/version', (_req, res) => res.json({ ok: true, version: process.env.GIT_SHA || 'local', time: new Date().toISOString() }))
 
 app.get('/me/capabilities', requireHubUser, getMeCapabilities)
+
+app.get('/company/settings/notebook-ai', requireHubUser, getCompanyNotebookAiSettings)
+app.put('/company/settings/notebook-ai', requireHubUser, rejectManagedNotebookAiUpdate)
+app.get('/company/settings/translation', requireHubUser, getCompanyTranslationSettings)
+app.put('/company/settings/translation', requireHubUser, rejectManagedTranslationUpdate)
 
 app.get('/notebook/items', requireHubUser, listNotebookItems)
 app.post('/notebook/items', requireHubUser, createNotebookItem)

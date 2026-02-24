@@ -64,6 +64,13 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
+function sendAiRuntimeError(res: Response, message: string) {
+  if (message === 'CAPABILITY_DISABLED') return sendNotebookError(res, 403, 'CAPABILITY_DISABLED')
+  if (message === 'CAPABILITY_EXPIRED') return sendNotebookError(res, 403, 'CAPABILITY_EXPIRED')
+  if (message === 'QUOTA_EXCEEDED') return sendNotebookError(res, 429, 'QUOTA_EXCEEDED')
+  return sendNotebookError(res, 502, 'MODEL_ERROR', message || 'MODEL_ERROR')
+}
+
 async function withItemFiles<T extends { id: string }>(context: { companyId: string; userId: string }, item: T | null) {
   if (!item) return null
   const files = await listNotebookItemFilesByItem(context.companyId, context.userId, item.id)
@@ -98,8 +105,10 @@ export async function listNotebookItems(req: Request, res: Response) {
   const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 100)
   const q = String(req.query.q || '').trim()
   const itemType = String(req.query.item_type || '').trim()
+  const filter = String(req.query.filter || 'all').trim().toLowerCase()
   const status = String(req.query.status || 'active').trim()
   const cursor = parseCursor(String(req.query.cursor || ''))
+  const isIndexable = filter === 'knowledge' ? true : filter === 'note' ? false : undefined
 
   try {
     const rows = await repoListNotebookItems({
@@ -107,6 +116,7 @@ export async function listNotebookItems(req: Request, res: Response) {
       ownerUserId: context.userId,
       status,
       itemType: itemType || undefined,
+      isIndexable,
       query: q || undefined,
       updatedBefore: cursor?.updatedAt || null,
       limit: limit + 1
@@ -548,7 +558,7 @@ export async function assistQuery(req: Request, res: Response) {
 
     return res.json({ ...result, trace_id: traceId })
   } catch (error: any) {
-    return sendNotebookError(res, 502, 'MODEL_ERROR', error?.message || 'MODEL_ERROR')
+    return sendAiRuntimeError(res, String(error?.message || 'MODEL_ERROR'))
   }
 }
 
@@ -610,8 +620,12 @@ export async function assistFromContext(req: Request, res: Response) {
       trace_id: traceId,
       context_message_ids: contextMessages.map((m) => m.event_id)
     })
-  } catch (_error) {
-    return sendNotebookError(res, 422, 'INVALID_CONTEXT')
+  } catch (error: any) {
+    const message = String(error?.message || '')
+    if (message === 'INVALID_CONTEXT') {
+      return sendNotebookError(res, 422, 'INVALID_CONTEXT')
+    }
+    return sendAiRuntimeError(res, message || 'MODEL_ERROR')
   }
 }
 

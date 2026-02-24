@@ -70,6 +70,7 @@ export async function listNotebookItems(params: {
   ownerUserId: string
   status: string
   itemType?: string
+  isIndexable?: boolean
   query?: string
   updatedBefore?: string | null
   limit: number
@@ -80,6 +81,11 @@ export async function listNotebookItems(params: {
   if (params.itemType) {
     values.push(params.itemType)
     where.push(`item_type = $${values.length}`)
+  }
+
+  if (params.isIndexable !== undefined) {
+    values.push(params.isIndexable)
+    where.push(`is_indexable = $${values.length}`)
   }
 
   if (params.query) {

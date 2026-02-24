@@ -1,6 +1,7 @@
 import { insertAssistLog } from '../repos/notebookRepo.js'
 import { hybridSearchNotebook } from './notebookIndexing.js'
 import { generateAssistAnswer, getNotebookAiConfig } from './notebookLlm.js'
+import { consumeAiRuntimeUsage } from './aiRuntimePolicy.js'
 
 export async function runNotebookAssist(params: {
   companyId: string
@@ -20,6 +21,34 @@ export async function runNotebookAssist(params: {
     query: params.queryText,
     topK: params.topK
   })
+
+  if (sources.length === 0) {
+    const answer = '知識庫未找到明確依據'
+    await insertAssistLog({
+      companyId: params.companyId,
+      userId: params.userId,
+      roomId: params.roomId || null,
+      triggerType: params.triggerType,
+      triggerEventId: params.triggerEventId,
+      queryText: params.queryText,
+      contextMessageIds: params.contextMessageIds || null,
+      usedSources: [],
+      responseText: answer,
+      responseConfidence: 0,
+      adoptedAction: 'none',
+      latencyMs: Date.now() - params.startAtMs
+    })
+
+    return {
+      answer,
+      sources: [],
+      citations: [],
+      confidence: 0,
+      guardrail: {
+        insufficient_evidence: true
+      }
+    }
+  }
 
   const aiConfig = await getNotebookAiConfig(params.companyId)
   const blocks = sources.map((s) => ({
@@ -42,6 +71,14 @@ export async function runNotebookAssist(params: {
     responseConfidence: confidence,
     adoptedAction: 'none',
     latencyMs: Date.now() - params.startAtMs
+  })
+
+  await consumeAiRuntimeUsage({
+    subjectType: 'company',
+    subjectId: params.companyId,
+    capabilityType: 'notebook_ai'
+  }).catch((error: any) => {
+    console.warn('[assist] quota usage update failed', error?.message || String(error))
   })
 
   return {
