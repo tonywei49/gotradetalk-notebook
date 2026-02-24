@@ -222,3 +222,61 @@ export async function generateAssistAnswer(
 
   return { answer, confidence }
 }
+
+export async function refineContextAssistQuery(
+  config: NotebookAiConfig,
+  params: {
+    anchorText: string
+    contextTexts: string[]
+    responseLanguage?: string | null
+  }
+): Promise<string> {
+  const anchorText = String(params.anchorText || '').trim()
+  const contextTexts = (params.contextTexts || []).map((line) => String(line || '').trim()).filter(Boolean)
+  const fallback = [anchorText, ...contextTexts].filter(Boolean).join('\n').trim()
+
+  if (!fallback) return ''
+  if (!config.chatBaseUrl || !config.chatApiKey) return fallback
+
+  const languageInstruction = buildLanguageInstruction(params.responseLanguage || 'zh-TW')
+  const systemPrompt = [
+    '你是檢索查詢重寫器。',
+    '任務：以「當前錨點句」作為主語意，將上文對話做為輔助，輸出最適合向知識庫檢索的查詢語句。',
+    '必須保留主問題核心，不得改變使用者意圖。',
+    '輸出只允許一行純文字，不要加前綴、編號、引號或解釋。',
+    '可補上關鍵名詞、約束條件、同義詞，但避免冗長。'
+  ].join('\n')
+
+  const userPrompt = [
+    `錨點句（主語意）：${anchorText || '(空)'}`,
+    '上文輔助句：',
+    contextTexts.length > 0 ? contextTexts.map((line, idx) => `${idx + 1}. ${line}`).join('\n') : '(無)',
+    languageInstruction
+  ].join('\n\n')
+
+  try {
+    const resp = await fetch(`${config.chatBaseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: authHeaders(config.chatApiKey),
+      body: JSON.stringify({
+        model: config.chatModel,
+        temperature: 0.1,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ]
+      })
+    })
+
+    if (!resp.ok) {
+      return fallback
+    }
+
+    const body = await resp.json() as { choices?: Array<{ message?: { content?: string } }> }
+    const content = String(body.choices?.[0]?.message?.content || '').trim()
+    const oneLine = content.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || ''
+    return oneLine || fallback
+  } catch {
+    return fallback
+  }
+}

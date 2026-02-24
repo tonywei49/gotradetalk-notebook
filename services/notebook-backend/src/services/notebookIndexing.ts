@@ -5,6 +5,7 @@ import {
   getIndexJobById,
   listActiveNotebookItemFilesByItem,
   getNotebookItemByCompany,
+  getIndexableActiveItemIdSet,
   getNotebookItemTitles,
   listPendingIndexJobIds,
   markIndexJobFailed,
@@ -271,6 +272,18 @@ export async function hybridSearchNotebook(params: {
         source_locator: row.source_locator ? String(row.source_locator) : null,
         score: Number(row.score || 0.1)
       })
+    }
+  }
+
+  const allowedItemIds = await getIndexableActiveItemIdSet(
+    params.companyId,
+    params.ownerUserId,
+    Array.from(new Set(Array.from(candidatesByKey.values()).map((c) => c.item_id)))
+  )
+
+  for (const [key, value] of Array.from(candidatesByKey.entries())) {
+    if (!allowedItemIds.has(value.item_id)) {
+      candidatesByKey.delete(key)
     }
   }
 

@@ -600,28 +600,40 @@ export async function searchChunksByQuery(params: {
 }): Promise<Array<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number }>> {
   const ftsResult = await dbQuery<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number }>(
     `select
-      item_id::text as item_id,
-      chunk_index,
-      chunk_text,
-      source_locator,
-      ts_rank_cd(to_tsvector('simple', chunk_text), websearch_to_tsquery('simple', $3)) as score
-     from public.notebook_chunks
-     where company_id = $1
-       and owner_user_id = $2
-       and to_tsvector('simple', chunk_text) @@ websearch_to_tsquery('simple', $3)
+      c.item_id::text as item_id,
+      c.chunk_index,
+      c.chunk_text,
+      c.source_locator,
+      ts_rank_cd(to_tsvector('simple', c.chunk_text), websearch_to_tsquery('simple', $3)) as score
+     from public.notebook_chunks c
+     inner join public.notebook_items i on i.id = c.item_id
+     where c.company_id = $1
+       and c.owner_user_id = $2
+       and i.company_id = $1
+       and i.owner_user_id = $2
+       and i.status = 'active'
+       and i.is_indexable = true
+       and to_tsvector('simple', c.chunk_text) @@ websearch_to_tsquery('simple', $3)
      order by score desc
      limit $4`,
     [params.companyId, params.ownerUserId, params.query, params.limit]
   ).catch(async () => {
     return dbQuery<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number }>(
       `select
-        item_id::text as item_id,
-        chunk_index,
-        chunk_text,
-        source_locator,
+        c.item_id::text as item_id,
+        c.chunk_index,
+        c.chunk_text,
+        c.source_locator,
         0.1::float8 as score
-       from public.notebook_chunks
-       where company_id = $1 and owner_user_id = $2 and chunk_text ilike $3
+       from public.notebook_chunks c
+       inner join public.notebook_items i on i.id = c.item_id
+       where c.company_id = $1
+         and c.owner_user_id = $2
+         and i.company_id = $1
+         and i.owner_user_id = $2
+         and i.status = 'active'
+         and i.is_indexable = true
+         and c.chunk_text ilike $3
        limit $4`,
       [params.companyId, params.ownerUserId, `%${params.query.slice(0, 64)}%`, params.limit]
     )
@@ -633,13 +645,20 @@ export async function searchChunksByQuery(params: {
 
   const fallback = await dbQuery<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number }>(
     `select
-      item_id::text as item_id,
-      chunk_index,
-      chunk_text,
-      source_locator,
+      c.item_id::text as item_id,
+      c.chunk_index,
+      c.chunk_text,
+      c.source_locator,
       0.1::float8 as score
-     from public.notebook_chunks
-     where company_id = $1 and owner_user_id = $2 and chunk_text ilike $3
+     from public.notebook_chunks c
+     inner join public.notebook_items i on i.id = c.item_id
+     where c.company_id = $1
+       and c.owner_user_id = $2
+       and i.company_id = $1
+       and i.owner_user_id = $2
+       and i.status = 'active'
+       and i.is_indexable = true
+       and c.chunk_text ilike $3
      limit $4`,
     [params.companyId, params.ownerUserId, `%${params.query.slice(0, 64)}%`, params.limit]
   )
@@ -658,6 +677,23 @@ export async function getNotebookItemTitles(companyId: string, ownerUserId: stri
   )
 
   return new Map(result.rows.map((row) => [row.id, row.title]))
+}
+
+export async function getIndexableActiveItemIdSet(companyId: string, ownerUserId: string, itemIds: string[]): Promise<Set<string>> {
+  if (itemIds.length === 0) return new Set()
+
+  const result = await dbQuery<{ id: string }>(
+    `select id::text as id
+     from public.notebook_items
+     where company_id = $1
+       and owner_user_id = $2
+       and status = 'active'
+       and is_indexable = true
+       and id = any($3::uuid[])`,
+    [companyId, ownerUserId, itemIds]
+  )
+
+  return new Set(result.rows.map((row) => row.id))
 }
 
 export type NotebookChunkRow = {

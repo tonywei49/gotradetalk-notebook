@@ -12,7 +12,21 @@
 - `DELETE /notebook/items/:id`
 - `POST /notebook/items/:id/files`
 - `GET /notebook/items/:id/index-status`
+- `POST /notebook/items/:id/reindex`
 - `POST /notebook/index/jobs/:id/retry`
+
+Notebook item DTO (minimum guaranteed fields):
+- `id`
+- `title`
+- `content_markdown`
+- `is_indexable`
+- `index_status` (`pending|running|success|failed|skipped`)
+- `index_error`
+- `updated_at`
+
+Mode semantics:
+- Knowledge-base mode: `is_indexable=true` -> enqueue `upsert` job.
+- Notebook mode: `is_indexable=false` -> enqueue `delete` job and remove vector/chunks.
 
 Common errors:
 - `403 CAPABILITY_DISABLED`
@@ -29,6 +43,9 @@ Guardrail behavior:
 - capability disabled: `403 CAPABILITY_DISABLED`
 - context invalid: `422 INVALID_CONTEXT`
 - anti-hallucination system prompt is always injected server-side
+
+Retrieval hard-limit:
+- Only `is_indexable=true` and `status=active` items are eligible in retrieval/rerank.
 
 Response fields:
 - `answer`

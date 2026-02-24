@@ -10,7 +10,7 @@
 ## 2.1 Backend（notebook-backend @ gotradetalk-notebook/services/notebook-backend）
 
 ### BE-01 資料表與 migration（Postgres）
-- [x] 進度: 已完成（含 up/down migration 與驗證）
+- [x] 進度: 已完成（含 up/down migration 與驗證；017_notebook_ai_provider_profiles 已套用）
 - 內容:
   - 建立 `notebook_items`, `notebook_chunks`, `notebook_index_jobs`, `assist_logs`, `notebook_sync_ops`
   - 增加必要索引（company_id, owner_user_id, updated_at, status）

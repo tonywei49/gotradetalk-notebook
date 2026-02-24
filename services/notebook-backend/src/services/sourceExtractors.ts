@@ -23,6 +23,12 @@ export type IndexItemFileRow = {
   is_indexable: boolean
 }
 
+function buildInlineTextSource(item: Pick<IndexItemRow, 'title' | 'content_markdown'>) {
+  const text = `${item.title || ''}\n${item.content_markdown || ''}`.trim()
+  if (!text) return null
+  return { text, sourceType: 'text', sourceLocator: null as string | null }
+}
+
 function isImageSource(mime?: string | null, fileName?: string | null) {
   const normalizedMime = String(mime || '').toLowerCase()
   const normalizedName = String(fileName || '').toLowerCase()
@@ -138,15 +144,18 @@ export async function extractItemSources(params: {
   const item = params.item
 
   if (item.item_type === 'text') {
-    const text = `${item.title || ''}\n${item.content_markdown || ''}`.trim()
-    return [{ text, sourceType: 'text', sourceLocator: null as string | null }]
+    const inlineSource = buildInlineTextSource(item)
+    return inlineSource ? [inlineSource] : []
   }
+
+  const outputs = [] as Array<{ text: string; sourceType: string; sourceLocator: string | null }>
+  const inlineSource = buildInlineTextSource(item)
+  if (inlineSource) outputs.push(inlineSource)
 
   const files = (params.files || [])
     .filter((file) => file.is_indexable && Boolean(file.matrix_media_mxc))
 
   if (files.length > 0) {
-    const outputs = []
     for (const file of files) {
       outputs.push(await extractSingleFileSource({
         file,
@@ -160,7 +169,7 @@ export async function extractItemSources(params: {
   }
 
   if (!item.is_indexable || !item.matrix_media_mxc) {
-    return []
+    return outputs
   }
 
   const fallback = await extractSingleFileSource({
@@ -176,5 +185,6 @@ export async function extractItemSources(params: {
     ocr: params.ocr,
     vision: params.vision
   })
-  return [fallback]
+  outputs.push(fallback)
+  return outputs
 }

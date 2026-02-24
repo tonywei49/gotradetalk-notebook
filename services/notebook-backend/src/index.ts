@@ -15,6 +15,7 @@ import {
   getNotebookIndexStatus,
   listNotebookItemFiles,
   listNotebookItems,
+  reindexNotebookItem,
   retryNotebookIndexJob,
   syncPull,
   syncPush,
@@ -68,6 +69,7 @@ app.post('/notebook/items/:id/files', requireHubUser, attachNotebookFile)
 app.get('/notebook/items/:id/files', requireHubUser, listNotebookItemFiles)
 app.delete('/notebook/items/:id/files/:fileId', requireHubUser, deleteNotebookItemFile)
 app.get('/notebook/items/:id/index-status', requireHubUser, getNotebookIndexStatus)
+app.post('/notebook/items/:id/reindex', requireHubUser, reindexNotebookItem)
 app.get('/notebook/items/:id/parsed-preview', requireHubUser, getNotebookItemParsedPreview)
 app.get('/notebook/items/:id/chunks', requireHubUser, getNotebookItemChunks)
 app.post('/notebook/index/jobs/:id/retry', requireHubUser, retryNotebookIndexJob)

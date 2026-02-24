@@ -10,7 +10,6 @@ import {
   getLatestIndexJobByItem,
   getNotebookItemByOwner,
   getSyncOpByClientOpId,
-  insertAssistLog,
   listNotebookItemFilesByItem,
   listNotebookItemFilesByItemIds,
   listNotebookChunksByItem,
@@ -29,8 +28,10 @@ import {
   resolveNotebookAccessContext,
   sendNotebookError
 } from '../services/notebookAuth.js'
-import { enqueueNotebookIndexJob, hybridSearchNotebook } from '../services/notebookIndexing.js'
-import { generateAssistAnswer, getNotebookAiConfig } from '../services/notebookLlm.js'
+import { enqueueNotebookIndexJob } from '../services/notebookIndexing.js'
+import { resolveMatrixContextMessages } from '../services/notebookContextResolver.js'
+import { runNotebookAssist } from '../services/notebookAssistOrchestrator.js'
+import { getNotebookAiConfig, refineContextAssistQuery } from '../services/notebookLlm.js'
 
 function getBearerToken(req: Request) {
   const authHeader = String(req.headers.authorization || '')
@@ -72,40 +73,6 @@ async function withItemFiles<T extends { id: string }>(context: { companyId: str
 async function withItemsFiles<T extends { id: string }>(context: { companyId: string; userId: string }, items: T[]) {
   const byItem = await listNotebookItemFilesByItemIds(context.companyId, context.userId, items.map((item) => item.id))
   return items.map((item) => ({ ...item, files: byItem.get(item.id) || [] }))
-}
-
-async function getContextMessages(req: Request, roomId: string, anchorEventId: string, windowSize = 5) {
-  const token = getMatrixContextToken(req)
-  const hsUrl = getMatrixBaseUrl(req)
-  if (!token || !hsUrl) {
-    throw new Error('INVALID_CONTEXT')
-  }
-
-  const url = new URL(`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/context/${encodeURIComponent(anchorEventId)}`, hsUrl)
-  url.searchParams.set('limit', String(windowSize))
-
-  const resp = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
-  })
-
-  if (!resp.ok) {
-    throw new Error('INVALID_CONTEXT')
-  }
-
-  const body = await resp.json() as {
-    event?: { event_id?: string; content?: { body?: string } }
-    events_before?: Array<{ event_id?: string; content?: { body?: string } }>
-  }
-
-  const before = (body.events_before || []).slice(-windowSize)
-  const ordered = [...before, ...(body.event ? [body.event] : [])]
-  const messages = ordered
-    .map((m) => ({ event_id: String(m.event_id || ''), body: String(m.content?.body || '').trim() }))
-    .filter((m) => m.event_id && m.body)
-
-  return messages
 }
 
 export async function getMeCapabilities(req: Request, res: Response) {
@@ -233,7 +200,7 @@ export async function updateNotebookItem(req: Request, res: Response) {
   if (body.status !== undefined) updates.status = body.status === 'deleted' ? 'deleted' : 'active'
   if (body.is_indexable !== undefined) {
     updates.is_indexable = Boolean(body.is_indexable)
-    updates.index_status = body.is_indexable ? 'pending' : 'skipped'
+    updates.index_status = 'pending'
     updates.index_error = null
   }
 
@@ -337,7 +304,7 @@ export async function attachNotebookFile(req: Request, res: Response) {
   const item = await updateNotebookItemByOwner(context.companyId, context.userId, id, {
     item_type: 'file',
     is_indexable: body.is_indexable !== false,
-    index_status: body.is_indexable === false ? 'skipped' : 'pending',
+    index_status: 'pending',
     index_error: null,
     revision: Number(existing.revision) + 1
   })
@@ -402,7 +369,7 @@ export async function deleteNotebookItemFile(req: Request, res: Response) {
     matrix_media_mime: latest?.matrix_media_mime || null,
     matrix_media_size: latest?.matrix_media_size ?? null,
     is_indexable: latest ? latest.is_indexable : false,
-    index_status: latest?.is_indexable ? 'pending' : 'skipped',
+    index_status: 'pending',
     index_error: null,
     revision: Number(item.revision) + 1
   })
@@ -526,6 +493,33 @@ export async function retryNotebookIndexJob(req: Request, res: Response) {
   return res.status(202).json({ job_id: jobId, status: 'pending' })
 }
 
+export async function reindexNotebookItem(req: Request, res: Response) {
+  const context = await resolveNotebookAccessContext(req)
+  if (!context) return sendNotebookError(res, 401, 'UNAUTHORIZED')
+  if (!ensureNotebookBasic(context, res)) return
+
+  const itemId = String(req.params.id || '').trim()
+  if (!itemId) return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id')
+
+  const item = await getNotebookItemByOwner(context.companyId, context.userId, itemId)
+  if (!item) return sendNotebookError(res, 404, 'NOT_FOUND')
+
+  await updateNotebookItemByOwner(context.companyId, context.userId, itemId, {
+    index_status: 'pending',
+    index_error: null
+  })
+
+  await enqueueNotebookIndexJob({
+    companyId: context.companyId,
+    ownerUserId: context.userId,
+    itemId,
+    jobType: item.is_indexable ? 'upsert' : 'delete'
+  })
+
+  const indexJob = await getLatestIndexJobByItem(context.companyId, itemId)
+  return res.status(202).json({ item_id: itemId, status: 'pending', index_job: indexJob || null })
+}
+
 export async function assistQuery(req: Request, res: Response) {
   const start = Date.now()
   const context = await resolveNotebookAccessContext(req)
@@ -540,46 +534,19 @@ export async function assistQuery(req: Request, res: Response) {
 
   const topK = Math.max(1, Math.min(Number(body.top_k || context.policy.retrieval_top_k || 5), 20))
   try {
-    const sources = await hybridSearchNotebook({
-      companyId: context.companyId,
-      ownerUserId: context.userId,
-      query: queryText,
-      topK
-    })
-
-    const aiConfig = await getNotebookAiConfig(context.companyId)
-    const blocks = sources.map((s) => ({
-      source: `${s.title || s.item_id}${s.source_locator ? ` (${s.source_locator})` : ''}`,
-      text: s.snippet
-    }))
-
-    const { answer, confidence } = await generateAssistAnswer(aiConfig, queryText, blocks, responseLang)
     const traceId = randomUUID()
-
-    await insertAssistLog({
+    const result = await runNotebookAssist({
       companyId: context.companyId,
       userId: context.userId,
       roomId,
-      triggerType: 'manual_query',
       queryText,
-      contextMessageIds: null,
-      usedSources: sources,
-      responseText: answer,
-      responseConfidence: confidence,
-      adoptedAction: 'none',
-      latencyMs: Date.now() - start
+      topK,
+      responseLang,
+      triggerType: 'manual_query',
+      startAtMs: start
     })
 
-    return res.json({
-      answer,
-      sources,
-      citations: sources.map((s, idx) => ({ source_id: `${s.item_id}:${idx + 1}`, locator: s.source_locator })),
-      confidence,
-      trace_id: traceId,
-      guardrail: {
-        insufficient_evidence: answer.includes('知識庫未找到明確依據')
-      }
-    })
+    return res.json({ ...result, trace_id: traceId })
   } catch (error: any) {
     return sendNotebookError(res, 502, 'MODEL_ERROR', error?.message || 'MODEL_ERROR')
   }
@@ -602,53 +569,46 @@ export async function assistFromContext(req: Request, res: Response) {
   }
 
   try {
-    const contextMessages = await getContextMessages(req, roomId, anchorEventId, windowSize)
-    if (contextMessages.length === 0) {
-      return sendNotebookError(res, 422, 'INVALID_CONTEXT')
-    }
-
-    const queryText = contextMessages.map((m) => m.body).join('\n')
-    const sources = await hybridSearchNotebook({
-      companyId: context.companyId,
-      ownerUserId: context.userId,
-      query: queryText,
-      topK: context.policy.retrieval_top_k || 5
+    const contextMessages = await resolveMatrixContextMessages({
+      hsUrl: getMatrixBaseUrl(req),
+      accessToken: getMatrixContextToken(req),
+      roomId,
+      anchorEventId,
+      windowSize
     })
 
-    const aiConfig = await getNotebookAiConfig(context.companyId)
-    const blocks = sources.map((s) => ({
-      source: `${s.title || s.item_id}${s.source_locator ? ` (${s.source_locator})` : ''}`,
-      text: s.snippet
-    }))
-
-    const { answer, confidence } = await generateAssistAnswer(aiConfig, queryText, blocks, responseLang)
+    const anchorMessage = contextMessages[contextMessages.length - 1]?.body || ''
+    const contextBefore = contextMessages.slice(0, -1).map((m) => m.body)
+    const fallbackQuery = [anchorMessage, ...contextBefore].filter(Boolean).join('\n')
+    let queryText = fallbackQuery
+    try {
+      const aiConfig = await getNotebookAiConfig(context.companyId)
+      queryText = await refineContextAssistQuery(aiConfig, {
+        anchorText: anchorMessage,
+        contextTexts: contextBefore,
+        responseLanguage: responseLang
+      })
+    } catch {
+      queryText = fallbackQuery
+    }
     const traceId = randomUUID()
-
-    await insertAssistLog({
+    const result = await runNotebookAssist({
       companyId: context.companyId,
       userId: context.userId,
       roomId,
+      queryText,
+      topK: context.policy.retrieval_top_k || 5,
+      responseLang,
       triggerType: 'from_message_context',
       triggerEventId: anchorEventId,
-      queryText,
       contextMessageIds: contextMessages.map((m) => m.event_id),
-      usedSources: sources,
-      responseText: answer,
-      responseConfidence: confidence,
-      adoptedAction: 'none',
-      latencyMs: Date.now() - start
+      startAtMs: start
     })
 
     return res.json({
-      answer,
-      sources,
-      citations: sources.map((s, idx) => ({ source_id: `${s.item_id}:${idx + 1}`, locator: s.source_locator })),
-      confidence,
+      ...result,
       trace_id: traceId,
-      context_message_ids: contextMessages.map((m) => m.event_id),
-      guardrail: {
-        insufficient_evidence: answer.includes('知識庫未找到明確依據')
-      }
+      context_message_ids: contextMessages.map((m) => m.event_id)
     })
   } catch (_error) {
     return sendNotebookError(res, 422, 'INVALID_CONTEXT')
