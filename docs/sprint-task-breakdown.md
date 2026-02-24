@@ -223,6 +223,15 @@
   - response test
 - 對應 UAT: `UAT-14`
 
+### AD-04 平台統一配置與公司側唯讀
+- [x] 進度: 已完成（含最小 E2E）
+- 內容:
+  - provider/key/model 改為平台級統一配置（`platform_ai_settings`）
+  - 主體策略改為 `subject_ai_policies`（company/client/personal）
+  - company 側設定頁降權唯讀，回傳 `managed_by_platform`
+  - company 側 provider/key/model 更新 API 改為 `MANAGED_BY_PLATFORM`
+- 對應 UAT: `UAT-14`, `UAT-08`
+
 ## 2.3 UI（gotradetalk-ui）
 
 ### UI-01 左側 Notebook 模組頁
