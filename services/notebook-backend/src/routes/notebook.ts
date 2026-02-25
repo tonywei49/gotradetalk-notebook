@@ -3,7 +3,10 @@ import { randomUUID } from 'crypto'
 import {
   createNotebookItemFile,
   createNotebookItem as repoCreateNotebookItem,
+  getIndexJobByCompany,
   getNotebookChunkStatsByItem,
+  getNotebookItemAccessible,
+  getNotebookItemByCompany,
   getLatestActiveNotebookItemFile,
   getNotebookItemFileByOwner,
   getIndexJobByOwner,
@@ -32,6 +35,7 @@ import { enqueueNotebookIndexJob } from '../services/notebookIndexing.js'
 import { resolveMatrixContextMessages } from '../services/notebookContextResolver.js'
 import { runNotebookAssist } from '../services/notebookAssistOrchestrator.js'
 import { getNotebookAiConfig, refineContextAssistQuery } from '../services/notebookLlm.js'
+import type { NotebookAccessContext } from '../services/notebookAuth.js'
 
 function getBearerToken(req: Request) {
   const authHeader = String(req.headers.authorization || '')
@@ -72,6 +76,20 @@ function sendAiRuntimeError(res: Response, message: string) {
     return sendNotebookError(res, 400, 'EMBEDDING_DIM_MISMATCH', message)
   }
   return sendNotebookError(res, 400, 'MODEL_ERROR', message || 'MODEL_ERROR')
+}
+
+function parseScope(value: unknown): 'personal' | 'company' | 'both' {
+  const scope = String(value || '').trim().toLowerCase()
+  if (scope === 'personal' || scope === 'company') return scope
+  return 'both'
+}
+
+function ensureCompanyKnowledgeAdmin(context: NotebookAccessContext, res: Response) {
+  if (!context.isCompanyAdmin) {
+    sendNotebookError(res, 403, 'FORBIDDEN_ROLE')
+    return false
+  }
+  return true
 }
 
 async function withItemFiles<T extends { id: string }>(context: { companyId: string; userId: string }, item: T | null) {
@@ -120,6 +138,7 @@ export async function listNotebookItems(req: Request, res: Response) {
   const itemType = String(req.query.item_type || '').trim()
   const filter = String(req.query.filter || 'all').trim().toLowerCase()
   const status = String(req.query.status || 'active').trim()
+  const scope = parseScope(req.query.scope)
   const cursor = parseCursor(String(req.query.cursor || ''))
   const isIndexable = filter === 'knowledge' ? true : filter === 'note' ? false : undefined
 
@@ -127,6 +146,7 @@ export async function listNotebookItems(req: Request, res: Response) {
     const rows = await repoListNotebookItems({
       companyId: context.companyId,
       ownerUserId: context.userId,
+      scope,
       status,
       itemType: itemType || undefined,
       isIndexable,
@@ -170,6 +190,7 @@ export async function createNotebookItem(req: Request, res: Response) {
     const item = await repoCreateNotebookItem({
       companyId: context.companyId,
       ownerUserId: context.userId,
+      sourceScope: 'personal',
       title,
       contentMarkdown,
       itemType,
@@ -189,6 +210,131 @@ export async function createNotebookItem(req: Request, res: Response) {
   } catch (error: any) {
     return sendNotebookError(res, 500, 'INTERNAL_ERROR', error?.message || 'CREATE_FAILED')
   }
+}
+
+export async function createCompanyNotebookItem(req: Request, res: Response) {
+  const context = await resolveNotebookAccessContext(req)
+  if (!context) return sendNotebookError(res, 401, 'UNAUTHORIZED')
+  if (!ensureNotebookBasic(context, res)) return
+  if (!ensureCompanyKnowledgeAdmin(context, res)) return
+
+  const body = req.body as {
+    title?: string
+    content_markdown?: string
+    item_type?: 'text' | 'file'
+    is_indexable?: boolean
+  }
+
+  const itemType = body.item_type === 'file' ? 'file' : 'text'
+  const title = String(body.title || '').trim() || null
+  const contentMarkdown = String(body.content_markdown || '').trim() || null
+  const isIndexable = Boolean(body.is_indexable !== false)
+
+  try {
+    const item = await repoCreateNotebookItem({
+      companyId: context.companyId,
+      ownerUserId: context.userId,
+      sourceScope: 'company',
+      title,
+      contentMarkdown,
+      itemType,
+      isIndexable
+    })
+
+    if (isIndexable) {
+      await enqueueNotebookIndexJob({
+        companyId: context.companyId,
+        ownerUserId: context.userId,
+        itemId: String(item.id),
+        jobType: 'upsert'
+      })
+    }
+
+    return res.status(201).json({ item })
+  } catch (error: any) {
+    return sendNotebookError(res, 500, 'INTERNAL_ERROR', error?.message || 'CREATE_COMPANY_ITEM_FAILED')
+  }
+}
+
+export async function updateCompanyNotebookItem(req: Request, res: Response) {
+  const context = await resolveNotebookAccessContext(req)
+  if (!context) return sendNotebookError(res, 401, 'UNAUTHORIZED')
+  if (!ensureNotebookBasic(context, res)) return
+  if (!ensureCompanyKnowledgeAdmin(context, res)) return
+
+  const id = String(req.params.id || '').trim()
+  if (!id) return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id')
+
+  const existing = await getNotebookItemByCompany(id, context.companyId)
+  if (!existing || existing.source_scope !== 'company') {
+    return sendNotebookError(res, 404, 'NOT_FOUND')
+  }
+
+  const body = req.body as {
+    title?: string
+    content_markdown?: string
+    is_indexable?: boolean
+    status?: 'active' | 'deleted'
+    revision?: number
+  }
+  if (body.revision !== undefined && Number(body.revision) !== Number(existing.revision)) {
+    return sendNotebookError(res, 409, 'REVISION_CONFLICT')
+  }
+
+  const updates: Record<string, unknown> = {
+    revision: Number(existing.revision) + 1
+  }
+  if (body.title !== undefined) updates.title = String(body.title || '').trim() || null
+  if (body.content_markdown !== undefined) updates.content_markdown = String(body.content_markdown || '').trim() || null
+  if (body.status !== undefined) updates.status = body.status === 'deleted' ? 'deleted' : 'active'
+  if (body.is_indexable !== undefined) {
+    updates.is_indexable = Boolean(body.is_indexable)
+    updates.index_status = 'pending'
+    updates.index_error = null
+  }
+
+  const item = await updateNotebookItemByOwner(context.companyId, existing.owner_user_id, id, updates)
+  if (!item) return sendNotebookError(res, 404, 'NOT_FOUND')
+
+  const shouldIndex = Boolean((updates.is_indexable ?? existing.is_indexable) === true)
+  await enqueueNotebookIndexJob({
+    companyId: context.companyId,
+    ownerUserId: existing.owner_user_id,
+    itemId: id,
+    jobType: shouldIndex ? 'upsert' : 'delete'
+  })
+
+  return res.json({ item })
+}
+
+export async function deleteCompanyNotebookItem(req: Request, res: Response) {
+  const context = await resolveNotebookAccessContext(req)
+  if (!context) return sendNotebookError(res, 401, 'UNAUTHORIZED')
+  if (!ensureNotebookBasic(context, res)) return
+  if (!ensureCompanyKnowledgeAdmin(context, res)) return
+
+  const id = String(req.params.id || '').trim()
+  if (!id) return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id')
+
+  const existing = await getNotebookItemByCompany(id, context.companyId)
+  if (!existing || existing.source_scope !== 'company') return sendNotebookError(res, 404, 'NOT_FOUND')
+
+  const item = await updateNotebookItemByOwner(context.companyId, existing.owner_user_id, id, {
+    status: 'deleted',
+    revision: Number(existing.revision) + 1,
+    index_status: 'pending',
+    index_error: null
+  })
+  if (!item) return sendNotebookError(res, 404, 'NOT_FOUND')
+
+  await enqueueNotebookIndexJob({
+    companyId: context.companyId,
+    ownerUserId: existing.owner_user_id,
+    itemId: id,
+    jobType: 'delete'
+  })
+
+  return res.json({ ok: true, revision: Number(existing.revision) + 1 })
 }
 
 export async function updateNotebookItem(req: Request, res: Response) {
@@ -415,7 +561,7 @@ export async function getNotebookIndexStatus(req: Request, res: Response) {
   if (!ensureNotebookBasic(context, res)) return
 
   const id = String(req.params.id || '').trim()
-  const item = await getNotebookItemByOwner(context.companyId, context.userId, id)
+  const item = await getNotebookItemAccessible(context.companyId, context.userId, id)
 
   if (!item) return sendNotebookError(res, 404, 'NOT_FOUND')
 
@@ -430,20 +576,20 @@ export async function getNotebookItemParsedPreview(req: Request, res: Response) 
   const id = String(req.params.id || '').trim()
   if (!id) return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id')
 
-  const item = await getNotebookItemByOwner(context.companyId, context.userId, id)
+  const item = await getNotebookItemAccessible(context.companyId, context.userId, id)
   if (!item) return sendNotebookError(res, 404, 'NOT_FOUND')
 
   const limit = Math.min(Math.max(Number(req.query.limit || 8), 1), 50)
   const chars = Math.min(Math.max(Number(req.query.chars || 6000), 500), 40000)
   const chunks = await listNotebookChunksByItem({
     companyId: context.companyId,
-    ownerUserId: context.userId,
+    ownerUserId: item.owner_user_id,
     itemId: id,
     limit
   })
   const stats = await getNotebookChunkStatsByItem({
     companyId: context.companyId,
-    ownerUserId: context.userId,
+    ownerUserId: item.owner_user_id,
     itemId: id
   })
 
@@ -476,19 +622,19 @@ export async function getNotebookItemChunks(req: Request, res: Response) {
   const id = String(req.params.id || '').trim()
   if (!id) return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id')
 
-  const item = await getNotebookItemByOwner(context.companyId, context.userId, id)
+  const item = await getNotebookItemAccessible(context.companyId, context.userId, id)
   if (!item) return sendNotebookError(res, 404, 'NOT_FOUND')
 
   const limit = Math.min(Math.max(Number(req.query.limit || 120), 1), 400)
   const chunks = await listNotebookChunksByItem({
     companyId: context.companyId,
-    ownerUserId: context.userId,
+    ownerUserId: item.owner_user_id,
     itemId: id,
     limit
   })
   const stats = await getNotebookChunkStatsByItem({
     companyId: context.companyId,
-    ownerUserId: context.userId,
+    ownerUserId: item.owner_user_id,
     itemId: id
   })
 
@@ -508,8 +654,16 @@ export async function retryNotebookIndexJob(req: Request, res: Response) {
 
   const jobId = String(req.params.id || '').trim()
 
-  const job = await getIndexJobByOwner(jobId, context.companyId, context.userId)
-
+  let job = await getIndexJobByOwner(jobId, context.companyId, context.userId)
+  if (!job && context.isCompanyAdmin) {
+    const companyJob = await getIndexJobByCompany(jobId, context.companyId)
+    if (companyJob) {
+      const item = await getNotebookItemByCompany(companyJob.item_id, context.companyId)
+      if (item?.source_scope === 'company') {
+        job = companyJob
+      }
+    }
+  }
   if (!job) return sendNotebookError(res, 404, 'JOB_NOT_FOUND')
 
   await markIndexJobPending(jobId)
@@ -524,17 +678,23 @@ export async function reindexNotebookItem(req: Request, res: Response) {
   const itemId = String(req.params.id || '').trim()
   if (!itemId) return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id')
 
-  const item = await getNotebookItemByOwner(context.companyId, context.userId, itemId)
+  let item = await getNotebookItemByOwner(context.companyId, context.userId, itemId)
+  if (!item && context.isCompanyAdmin) {
+    const companyItem = await getNotebookItemByCompany(itemId, context.companyId)
+    if (companyItem?.source_scope === 'company') {
+      item = companyItem
+    }
+  }
   if (!item) return sendNotebookError(res, 404, 'NOT_FOUND')
 
-  await updateNotebookItemByOwner(context.companyId, context.userId, itemId, {
+  await updateNotebookItemByOwner(context.companyId, item.owner_user_id, itemId, {
     index_status: 'pending',
     index_error: null
   })
 
   await enqueueNotebookIndexJob({
     companyId: context.companyId,
-    ownerUserId: context.userId,
+    ownerUserId: item.owner_user_id,
     itemId,
     jobType: item.is_indexable ? 'upsert' : 'delete'
   })
@@ -549,10 +709,11 @@ export async function assistQuery(req: Request, res: Response) {
   if (!context) return sendNotebookError(res, 401, 'UNAUTHORIZED')
   if (!ensureAssistAllowed(context, res)) return
 
-  const body = req.body as { room_id?: string; query?: string; top_k?: number; response_lang?: string }
+  const body = req.body as { room_id?: string; query?: string; top_k?: number; response_lang?: string; scope?: 'personal' | 'company' | 'both' }
   const queryText = String(body.query || '').trim()
   const roomId = String(body.room_id || '').trim() || null
   const responseLang = String(body.response_lang || '').trim() || 'zh-TW'
+  const scope = parseScope(body.scope)
   if (!queryText) return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing query')
 
   const topK = Math.max(1, Math.min(Number(body.top_k || context.policy.retrieval_top_k || 5), 20))
@@ -564,6 +725,7 @@ export async function assistQuery(req: Request, res: Response) {
       roomId,
       queryText,
       topK,
+      scope,
       responseLang,
       triggerType: 'manual_query',
       startAtMs: start
@@ -581,11 +743,12 @@ export async function assistFromContext(req: Request, res: Response) {
   if (!context) return sendNotebookError(res, 401, 'UNAUTHORIZED')
   if (!ensureAssistAllowed(context, res)) return
 
-  const body = req.body as { room_id?: string; anchor_event_id?: string; window_size?: number; response_lang?: string }
+  const body = req.body as { room_id?: string; anchor_event_id?: string; window_size?: number; response_lang?: string; scope?: 'personal' | 'company' | 'both' }
   const roomId = String(body.room_id || '').trim()
   const anchorEventId = String(body.anchor_event_id || '').trim()
   const windowSize = Math.min(Math.max(Number(body.window_size || 5), 1), 20)
   const responseLang = String(body.response_lang || '').trim() || 'zh-TW'
+  const scope = parseScope(body.scope)
 
   if (!roomId || !anchorEventId) {
     return sendNotebookError(res, 422, 'INVALID_CONTEXT')
@@ -621,6 +784,7 @@ export async function assistFromContext(req: Request, res: Response) {
       roomId,
       queryText,
       topK: context.policy.retrieval_top_k || 5,
+      scope,
       responseLang,
       triggerType: 'from_message_context',
       triggerEventId: anchorEventId,

@@ -6,6 +6,7 @@ export type IndexItemRow = {
   id: string
   company_id: string
   owner_user_id: string
+  source_scope: 'personal' | 'company'
   item_type: 'text' | 'file'
   content_markdown: string | null
   title: string | null

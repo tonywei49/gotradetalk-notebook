@@ -4,6 +4,7 @@ export type NotebookItemRow = {
   id: string
   company_id: string
   owner_user_id: string
+  source_scope: 'personal' | 'company'
   title: string | null
   content_markdown: string | null
   item_type: 'text' | 'file'
@@ -50,6 +51,7 @@ export type NotebookIndexJobRow = {
 }
 
 type SyncStatus = 'pending' | 'applied' | 'conflict' | 'rejected'
+type NotebookSourceScope = 'personal' | 'company'
 
 function mapNotebookItem(row: any): NotebookItemRow {
   return {
@@ -69,14 +71,27 @@ export async function listNotebookItems(params: {
   companyId: string
   ownerUserId: string
   status: string
+  scope?: 'personal' | 'company' | 'both'
   itemType?: string
   isIndexable?: boolean
   query?: string
   updatedBefore?: string | null
   limit: number
 }): Promise<NotebookItemRow[]> {
-  const values: unknown[] = [params.companyId, params.ownerUserId, params.status]
-  const where: string[] = ['company_id = $1', 'owner_user_id = $2', 'status = $3']
+  const values: unknown[] = [params.companyId, params.status]
+  const where: string[] = ['company_id = $1', 'status = $2']
+  const scope = params.scope || 'both'
+
+  if (scope === 'personal') {
+    values.push(params.ownerUserId)
+    where.push(`owner_user_id = $${values.length}`)
+    where.push(`source_scope = 'personal'`)
+  } else if (scope === 'company') {
+    where.push(`source_scope = 'company'`)
+  } else {
+    values.push(params.ownerUserId)
+    where.push(`(source_scope = 'company' or (source_scope = 'personal' and owner_user_id = $${values.length}))`)
+  }
 
   if (params.itemType) {
     values.push(params.itemType)
@@ -102,7 +117,7 @@ export async function listNotebookItems(params: {
 
   const result = await dbQuery<any>(
     `select id::text as id, company_id::text as company_id, owner_user_id::text as owner_user_id,
-            title, content_markdown, item_type::text as item_type,
+            source_scope::text as source_scope, title, content_markdown, item_type::text as item_type,
             matrix_media_mxc, matrix_media_name, matrix_media_mime, matrix_media_size,
             is_indexable, index_status::text as index_status, index_error,
             status::text as status, revision, created_at::text as created_at, updated_at::text as updated_at
@@ -134,7 +149,7 @@ export async function listNotebookItemsAfterCursor(params: {
 
   const result = await dbQuery<any>(
     `select id::text as id, company_id::text as company_id, owner_user_id::text as owner_user_id,
-            title, content_markdown, item_type::text as item_type,
+            source_scope::text as source_scope, title, content_markdown, item_type::text as item_type,
             matrix_media_mxc, matrix_media_name, matrix_media_mime, matrix_media_size,
             is_indexable, index_status::text as index_status, index_error,
             status::text as status, revision, created_at::text as created_at, updated_at::text as updated_at
@@ -151,7 +166,7 @@ export async function listNotebookItemsAfterCursor(params: {
 export async function getNotebookItemByOwner(companyId: string, ownerUserId: string, itemId: string): Promise<NotebookItemRow | null> {
   const result = await dbQuery<any>(
     `select id::text as id, company_id::text as company_id, owner_user_id::text as owner_user_id,
-            title, content_markdown, item_type::text as item_type,
+            source_scope::text as source_scope, title, content_markdown, item_type::text as item_type,
             matrix_media_mxc, matrix_media_name, matrix_media_mime, matrix_media_size,
             is_indexable, index_status::text as index_status, index_error,
             status::text as status, revision, created_at::text as created_at, updated_at::text as updated_at
@@ -167,7 +182,7 @@ export async function getNotebookItemByOwner(companyId: string, ownerUserId: str
 export async function getNotebookItemByCompany(itemId: string, companyId: string): Promise<NotebookItemRow | null> {
   const result = await dbQuery<any>(
     `select id::text as id, company_id::text as company_id, owner_user_id::text as owner_user_id,
-            title, content_markdown, item_type::text as item_type,
+            source_scope::text as source_scope, title, content_markdown, item_type::text as item_type,
             matrix_media_mxc, matrix_media_name, matrix_media_mime, matrix_media_size,
             is_indexable, index_status::text as index_status, index_error,
             status::text as status, revision, created_at::text as created_at, updated_at::text as updated_at
@@ -180,17 +195,36 @@ export async function getNotebookItemByCompany(itemId: string, companyId: string
   return result.rows[0] ? mapNotebookItem(result.rows[0]) : null
 }
 
+export async function getNotebookItemAccessible(companyId: string, ownerUserId: string, itemId: string): Promise<NotebookItemRow | null> {
+  const result = await dbQuery<any>(
+    `select id::text as id, company_id::text as company_id, owner_user_id::text as owner_user_id,
+            source_scope::text as source_scope, title, content_markdown, item_type::text as item_type,
+            matrix_media_mxc, matrix_media_name, matrix_media_mime, matrix_media_size,
+            is_indexable, index_status::text as index_status, index_error,
+            status::text as status, revision, created_at::text as created_at, updated_at::text as updated_at
+     from public.notebook_items
+     where id = $1
+       and company_id = $2
+       and (source_scope = 'company' or (source_scope = 'personal' and owner_user_id = $3))
+     limit 1`,
+    [itemId, companyId, ownerUserId]
+  )
+
+  return result.rows[0] ? mapNotebookItem(result.rows[0]) : null
+}
+
 export async function createNotebookItem(params: {
   companyId: string
   ownerUserId: string
+  sourceScope?: NotebookSourceScope
   title: string | null
   contentMarkdown: string | null
   itemType: 'text' | 'file'
   isIndexable: boolean
   fixedId?: string
 }): Promise<NotebookItemRow> {
-  const columns = ['company_id', 'owner_user_id', 'title', 'content_markdown', 'item_type', 'is_indexable', 'index_status', 'status', 'revision']
-  const values: unknown[] = [params.companyId, params.ownerUserId, params.title, params.contentMarkdown, params.itemType, params.isIndexable, params.isIndexable ? 'pending' : 'skipped', 'active', 1]
+  const columns = ['company_id', 'owner_user_id', 'source_scope', 'title', 'content_markdown', 'item_type', 'is_indexable', 'index_status', 'status', 'revision']
+  const values: unknown[] = [params.companyId, params.ownerUserId, params.sourceScope || 'personal', params.title, params.contentMarkdown, params.itemType, params.isIndexable, params.isIndexable ? 'pending' : 'skipped', 'active', 1]
 
   if (params.fixedId) {
     columns.unshift('id')
@@ -203,7 +237,7 @@ export async function createNotebookItem(params: {
     `insert into public.notebook_items (${columns.join(', ')})
      values (${placeholders})
      returning id::text as id, company_id::text as company_id, owner_user_id::text as owner_user_id,
-               title, content_markdown, item_type::text as item_type,
+               source_scope::text as source_scope, title, content_markdown, item_type::text as item_type,
                matrix_media_mxc, matrix_media_name, matrix_media_mime, matrix_media_size,
                is_indexable, index_status::text as index_status, index_error,
                status::text as status, revision, created_at::text as created_at, updated_at::text as updated_at`,
@@ -234,7 +268,8 @@ export async function updateNotebookItemByOwner(
     'matrix_media_name',
     'matrix_media_mime',
     'matrix_media_size',
-    'revision'
+    'revision',
+    'source_scope'
   ]
 
   for (const key of updatable) {
@@ -255,7 +290,7 @@ export async function updateNotebookItemByOwner(
      set ${setClauses.join(', ')}
      where id = $${values.length - 2} and company_id = $${values.length - 1} and owner_user_id = $${values.length}
      returning id::text as id, company_id::text as company_id, owner_user_id::text as owner_user_id,
-               title, content_markdown, item_type::text as item_type,
+               source_scope::text as source_scope, title, content_markdown, item_type::text as item_type,
                matrix_media_mxc, matrix_media_name, matrix_media_mime, matrix_media_size,
                is_indexable, index_status::text as index_status, index_error,
                status::text as status, revision, created_at::text as created_at, updated_at::text as updated_at`,
@@ -467,6 +502,17 @@ export async function getIndexJobByOwner(jobId: string, companyId: string, owner
   return result.rows[0] || null
 }
 
+export async function getIndexJobByCompany(jobId: string, companyId: string): Promise<{ id: string; item_id: string } | null> {
+  const result = await dbQuery<{ id: string; item_id: string }>(
+    `select id::text as id, item_id::text as item_id
+     from public.notebook_index_jobs
+     where id = $1 and company_id = $2
+     limit 1`,
+    [jobId, companyId]
+  )
+  return result.rows[0] || null
+}
+
 export async function markIndexJobPending(jobId: string) {
   await dbQuery(
     `update public.notebook_index_jobs
@@ -601,44 +647,54 @@ export async function deleteChunksByItem(companyId: string, itemId: string) {
 export async function searchChunksByQuery(params: {
   companyId: string
   ownerUserId: string
+  scope?: 'personal' | 'company' | 'both'
   query: string
   limit: number
-}): Promise<Array<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number }>> {
-  const ftsResult = await dbQuery<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number }>(
+}): Promise<Array<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number; source_scope: 'personal' | 'company'; source_file_name: string | null }>> {
+  const scope = params.scope || 'both'
+  const scopeClause = scope === 'personal'
+    ? `and i.source_scope = 'personal' and i.owner_user_id = $2 and c.owner_user_id = $2`
+    : scope === 'company'
+    ? `and i.source_scope = 'company'`
+    : `and (i.source_scope = 'company' or (i.source_scope = 'personal' and i.owner_user_id = $2 and c.owner_user_id = $2))`
+
+  const ftsResult = await dbQuery<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number; source_scope: 'personal' | 'company'; source_file_name: string | null }>(
     `select
       c.item_id::text as item_id,
       c.chunk_index,
       c.chunk_text,
       c.source_locator,
+      i.source_scope::text as source_scope,
+      i.matrix_media_name as source_file_name,
       ts_rank_cd(to_tsvector('simple', c.chunk_text), websearch_to_tsquery('simple', $3)) as score
      from public.notebook_chunks c
      inner join public.notebook_items i on i.id = c.item_id
      where c.company_id = $1
-       and c.owner_user_id = $2
        and i.company_id = $1
-       and i.owner_user_id = $2
        and i.status = 'active'
        and i.is_indexable = true
+       ${scopeClause}
        and to_tsvector('simple', c.chunk_text) @@ websearch_to_tsquery('simple', $3)
      order by score desc
      limit $4`,
     [params.companyId, params.ownerUserId, params.query, params.limit]
   ).catch(async () => {
-    return dbQuery<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number }>(
+    return dbQuery<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number; source_scope: 'personal' | 'company'; source_file_name: string | null }>(
       `select
         c.item_id::text as item_id,
         c.chunk_index,
         c.chunk_text,
         c.source_locator,
+        i.source_scope::text as source_scope,
+        i.matrix_media_name as source_file_name,
         0.1::float8 as score
        from public.notebook_chunks c
        inner join public.notebook_items i on i.id = c.item_id
        where c.company_id = $1
-         and c.owner_user_id = $2
          and i.company_id = $1
-         and i.owner_user_id = $2
          and i.status = 'active'
          and i.is_indexable = true
+         ${scopeClause}
          and c.chunk_text ilike $3
        limit $4`,
       [params.companyId, params.ownerUserId, `%${params.query.slice(0, 64)}%`, params.limit]
@@ -649,21 +705,22 @@ export async function searchChunksByQuery(params: {
     return ftsResult.rows.map((row) => ({ ...row, score: Number(row.score || 0) }))
   }
 
-  const fallback = await dbQuery<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number }>(
+  const fallback = await dbQuery<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number; source_scope: 'personal' | 'company'; source_file_name: string | null }>(
     `select
       c.item_id::text as item_id,
       c.chunk_index,
       c.chunk_text,
       c.source_locator,
+      i.source_scope::text as source_scope,
+      i.matrix_media_name as source_file_name,
       0.1::float8 as score
      from public.notebook_chunks c
      inner join public.notebook_items i on i.id = c.item_id
      where c.company_id = $1
-       and c.owner_user_id = $2
        and i.company_id = $1
-       and i.owner_user_id = $2
        and i.status = 'active'
        and i.is_indexable = true
+       ${scopeClause}
        and c.chunk_text ilike $3
      limit $4`,
     [params.companyId, params.ownerUserId, `%${params.query.slice(0, 64)}%`, params.limit]
@@ -685,14 +742,47 @@ export async function getNotebookItemTitles(companyId: string, ownerUserId: stri
   return new Map(result.rows.map((row) => [row.id, row.title]))
 }
 
-export async function getIndexableActiveItemIdSet(companyId: string, ownerUserId: string, itemIds: string[]): Promise<Set<string>> {
+export async function getNotebookItemSources(
+  companyId: string,
+  ownerUserId: string,
+  itemIds: string[],
+  scope: 'personal' | 'company' | 'both' = 'both'
+): Promise<Map<string, { title: string | null; source_scope: 'personal' | 'company'; source_file_name: string | null }>> {
+  if (itemIds.length === 0) return new Map()
+  const scopeClause = scope === 'personal'
+    ? `and source_scope = 'personal' and owner_user_id = $2`
+    : scope === 'company'
+    ? `and source_scope = 'company'`
+    : `and (source_scope = 'company' or (source_scope = 'personal' and owner_user_id = $2))`
+  const result = await dbQuery<{ id: string; title: string | null; source_scope: 'personal' | 'company'; source_file_name: string | null }>(
+    `select id::text as id, title, source_scope::text as source_scope, matrix_media_name as source_file_name
+     from public.notebook_items
+     where company_id = $1
+       ${scopeClause}
+       and id = any($3::uuid[])`,
+    [companyId, ownerUserId, itemIds]
+  )
+  return new Map(result.rows.map((row) => [row.id, { title: row.title, source_scope: row.source_scope, source_file_name: row.source_file_name }]))
+}
+
+export async function getIndexableActiveItemIdSet(
+  companyId: string,
+  ownerUserId: string,
+  itemIds: string[],
+  scope: 'personal' | 'company' | 'both' = 'both'
+): Promise<Set<string>> {
   if (itemIds.length === 0) return new Set()
+  const scopeClause = scope === 'personal'
+    ? `and source_scope = 'personal' and owner_user_id = $2`
+    : scope === 'company'
+    ? `and source_scope = 'company'`
+    : `and (source_scope = 'company' or (source_scope = 'personal' and owner_user_id = $2))`
 
   const result = await dbQuery<{ id: string }>(
     `select id::text as id
      from public.notebook_items
      where company_id = $1
-       and owner_user_id = $2
+       ${scopeClause}
        and status = 'active'
        and is_indexable = true
        and id = any($3::uuid[])`,

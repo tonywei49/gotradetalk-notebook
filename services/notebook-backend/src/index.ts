@@ -7,8 +7,10 @@ import {
   assistQuery,
   attachNotebookFile,
   createNotebookItem,
+  createCompanyNotebookItem,
   deleteNotebookItemFile,
   deleteNotebookItem,
+  deleteCompanyNotebookItem,
   getMeCapabilities,
   getNotebookItemChunks,
   getNotebookItemParsedPreview,
@@ -19,7 +21,8 @@ import {
   retryNotebookIndexJob,
   syncPull,
   syncPush,
-  updateNotebookItem
+  updateNotebookItem,
+  updateCompanyNotebookItem
 } from './routes/notebook.js'
 import { getInternalNotebookAiSettings, upsertInternalNotebookAiSettings } from './routes/internalNotebookSettings.js'
 import {
@@ -74,8 +77,11 @@ app.put('/company/settings/translation', requireHubUser, rejectManagedTranslatio
 
 app.get('/notebook/items', requireHubUser, listNotebookItems)
 app.post('/notebook/items', requireHubUser, createNotebookItem)
+app.post('/notebook/company/items', requireHubUser, createCompanyNotebookItem)
 app.patch('/notebook/items/:id', requireHubUser, updateNotebookItem)
+app.patch('/notebook/company/items/:id', requireHubUser, updateCompanyNotebookItem)
 app.delete('/notebook/items/:id', requireHubUser, deleteNotebookItem)
+app.delete('/notebook/company/items/:id', requireHubUser, deleteCompanyNotebookItem)
 app.post('/notebook/items/:id/files', requireHubUser, attachNotebookFile)
 app.get('/notebook/items/:id/files', requireHubUser, listNotebookItemFiles)
 app.delete('/notebook/items/:id/files/:fileId', requireHubUser, deleteNotebookItemFile)

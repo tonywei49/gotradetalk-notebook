@@ -6,6 +6,7 @@ import { consumeAiRuntimeUsage } from './aiRuntimePolicy.js'
 export async function runNotebookAssist(params: {
   companyId: string
   userId: string
+  scope: 'personal' | 'company' | 'both'
   roomId?: string | null
   queryText: string
   topK: number
@@ -18,6 +19,7 @@ export async function runNotebookAssist(params: {
   const sources = await hybridSearchNotebook({
     companyId: params.companyId,
     ownerUserId: params.userId,
+    scope: params.scope,
     query: params.queryText,
     topK: params.topK
   })
@@ -52,7 +54,7 @@ export async function runNotebookAssist(params: {
 
   const aiConfig = await getNotebookAiConfig(params.companyId)
   const blocks = sources.map((s) => ({
-    source: `${s.title || s.item_id}${s.source_locator ? ` (${s.source_locator})` : ''}`,
+    source: `${s.source_title || s.item_id}${s.source_locator ? ` (${s.source_locator})` : ''}`,
     text: s.snippet
   }))
 

@@ -104,6 +104,7 @@ async function main() {
     const rows = await hybridSearchNotebook({
       companyId,
       ownerUserId,
+      scope: 'personal',
       query: c.query,
       topK
     })

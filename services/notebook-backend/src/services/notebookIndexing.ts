@@ -6,7 +6,7 @@ import {
   listActiveNotebookItemFilesByItem,
   getNotebookItemByCompany,
   getIndexableActiveItemIdSet,
-  getNotebookItemTitles,
+  getNotebookItemSources,
   listPendingIndexJobIds,
   markIndexJobFailed,
   markIndexJobRunning,
@@ -121,6 +121,7 @@ export async function runNotebookIndexJob(jobId: string, options?: { matrixBaseU
             item_id: item.id,
             company_id: item.company_id,
             owner_user_id: item.owner_user_id,
+            source_scope: item.source_scope,
             chunk_index: chunk.chunkIndex,
             content_hash: chunk.contentHash,
             source_type: chunk.sourceType,
@@ -165,9 +166,10 @@ export async function pollAndRunNotebookIndexJobs(limit = 5, options?: { matrixB
 export async function hybridSearchNotebook(params: {
   companyId: string
   ownerUserId: string
+  scope: 'personal' | 'company' | 'both'
   query: string
   topK: number
-}): Promise<Array<{ item_id: string; title: string | null; snippet: string; source_locator: string | null; score: number }>> {
+}): Promise<Array<{ item_id: string; title: string | null; source_scope: 'personal' | 'company'; source_title: string | null; source_file_name: string | null; snippet: string; source_locator: string | null; score: number }>> {
   const reciprocalRankFusion = (
     lists: Array<Array<{ key: string }>>,
     weights: number[] = [],
@@ -191,6 +193,7 @@ export async function hybridSearchNotebook(params: {
   const bmRows = await searchChunksByQuery({
     companyId: params.companyId,
     ownerUserId: params.ownerUserId,
+    scope: params.scope,
     query: params.query,
     limit: topK * 4
   })
@@ -216,15 +219,19 @@ export async function hybridSearchNotebook(params: {
     }
 
     const lexicalCandidates = Array.from(lexicalByKey.values()).slice(0, topK)
-    const titleMap = await getNotebookItemTitles(
+    const sourceMap = await getNotebookItemSources(
       params.companyId,
       params.ownerUserId,
-      Array.from(new Set(lexicalCandidates.map((c) => c.item_id)))
+      Array.from(new Set(lexicalCandidates.map((c) => c.item_id))),
+      params.scope
     )
 
     return lexicalCandidates.map((row) => ({
       item_id: row.item_id,
-      title: titleMap.get(row.item_id) || null,
+      source_scope: (sourceMap.get(row.item_id)?.source_scope || 'personal') as 'personal' | 'company',
+      source_title: sourceMap.get(row.item_id)?.title || null,
+      title: sourceMap.get(row.item_id)?.title || null,
+      source_file_name: sourceMap.get(row.item_id)?.source_file_name || null,
       snippet: row.snippet,
       source_locator: row.source_locator,
       score: row.score
@@ -237,7 +244,7 @@ export async function hybridSearchNotebook(params: {
   if (vector.length !== expectedDim) {
     throw new Error(`EMBEDDING_DIM_MISMATCH: expected ${expectedDim} got ${vector.length}`)
   }
-  const vectorHits = await searchNotebookVectors(params.companyId, params.ownerUserId, vector, topK * 2)
+  const vectorHits = await searchNotebookVectors(params.companyId, params.ownerUserId, vector, topK * 2, params.scope)
 
   const vectorList: Array<{ key: string; item_id: string; snippet: string; source_locator: string | null; base_score: number }> = []
   const bm25List: Array<{ key: string; item_id: string; snippet: string; source_locator: string | null; base_score: number }> = []
@@ -287,7 +294,8 @@ export async function hybridSearchNotebook(params: {
   const allowedItemIds = await getIndexableActiveItemIdSet(
     params.companyId,
     params.ownerUserId,
-    Array.from(new Set(Array.from(candidatesByKey.values()).map((c) => c.item_id)))
+    Array.from(new Set(Array.from(candidatesByKey.values()).map((c) => c.item_id))),
+    params.scope
   )
 
   for (const [key, value] of Array.from(candidatesByKey.entries())) {
@@ -330,17 +338,21 @@ export async function hybridSearchNotebook(params: {
     return { ...row, score: blendedScore }
   }).sort((a, b) => b.score - a.score)
 
-  const titleMap = await getNotebookItemTitles(
+  const sourceMap = await getNotebookItemSources(
     params.companyId,
     params.ownerUserId,
-    Array.from(new Set(candidates.map((c) => c.item_id)))
+    Array.from(new Set(candidates.map((c) => c.item_id))),
+    params.scope
   )
 
   return blended.slice(0, topK).map((row) => {
     const candidate = candidates[row.index]
     return {
       item_id: candidate.item_id,
-      title: titleMap.get(candidate.item_id) || null,
+      source_scope: (sourceMap.get(candidate.item_id)?.source_scope || 'personal') as 'personal' | 'company',
+      source_title: sourceMap.get(candidate.item_id)?.title || null,
+      title: sourceMap.get(candidate.item_id)?.title || null,
+      source_file_name: sourceMap.get(candidate.item_id)?.source_file_name || null,
       snippet: candidate.snippet,
       source_locator: candidate.source_locator,
       score: row.score

@@ -24,6 +24,7 @@ test('extractItemSources: text item indexes title + content', async () => {
       id: 'item-text-1',
       company_id: 'company-1',
       owner_user_id: 'owner-1',
+      source_scope: 'personal',
       item_type: 'text',
       content_markdown: 'Body content',
       title: 'My title',
@@ -48,6 +49,7 @@ test('extractItemSources: file item also indexes title + content even without fi
       id: 'item-file-1',
       company_id: 'company-1',
       owner_user_id: 'owner-1',
+      source_scope: 'personal',
       item_type: 'file',
       content_markdown: 'Supplement note for retrieval',
       title: 'Spec PDF',
@@ -66,4 +68,3 @@ test('extractItemSources: file item also indexes title + content even without fi
   assert.match(sources[0]?.text || '', /Spec PDF/)
   assert.match(sources[0]?.text || '', /Supplement note for retrieval/)
 })
-

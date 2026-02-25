@@ -13,6 +13,7 @@ export type NotebookAccessContext = {
   userId: string
   companyId: string
   role: NotebookRole
+  isCompanyAdmin: boolean
   capabilities: string[]
   policy: {
     managed_by_platform: boolean
@@ -28,6 +29,11 @@ export type NotebookAccessContext = {
     max_context_tokens: number
     ocr_enabled: boolean
   }
+}
+
+function isCompanyAdminMember(user: RequestUser, companyId: string) {
+  const adminRoles = new Set(['admin', 'owner', 'company_admin'])
+  return (user.memberships || []).some((m) => String(m.company_id || '') === companyId && adminRoles.has(String(m.role || '').toLowerCase()))
 }
 
 function toRole(userType: string | undefined, isEmployee: boolean): NotebookRole {
@@ -61,6 +67,7 @@ export async function resolveNotebookAccessContext(req: Request): Promise<Notebo
   }
 
   const role = toRole(profile.user_type || user.userType, user.isEmployee)
+  const isCompanyAdmin = role === 'admin' || isCompanyAdminMember(user, companyId)
   const settings = await getCompanySettings(companyId)
   const runtimePolicy = await resolveAiRuntimePolicy({
     subjectType: 'company',
@@ -97,6 +104,7 @@ export async function resolveNotebookAccessContext(req: Request): Promise<Notebo
     userId: user.id,
     companyId,
     role,
+    isCompanyAdmin,
     capabilities: dedupeCapabilities(capabilities),
     policy
   }

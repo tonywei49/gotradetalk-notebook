@@ -101,7 +101,13 @@ export async function deleteNotebookPointsByItem(companyId: string, itemId: stri
   }
 }
 
-export async function searchNotebookVectors(companyId: string, ownerUserId: string, vector: number[], limit = 10) {
+export async function searchNotebookVectors(
+  companyId: string,
+  ownerUserId: string,
+  vector: number[],
+  limit = 10,
+  scope: 'personal' | 'company' | 'both' = 'both'
+) {
   const { baseUrl, apiKey, collection } = getQdrantConfig()
   if (!baseUrl || vector.length === 0) return [] as any[]
 
@@ -115,8 +121,7 @@ export async function searchNotebookVectors(companyId: string, ownerUserId: stri
       with_payload: true,
       filter: {
         must: [
-          { key: 'company_id', match: { value: companyId } },
-          { key: 'owner_user_id', match: { value: ownerUserId } }
+          { key: 'company_id', match: { value: companyId } }
         ]
       }
     })
@@ -128,5 +133,15 @@ export async function searchNotebookVectors(companyId: string, ownerUserId: stri
   }
 
   const body = await resp.json() as { result?: any[] }
-  return body.result || []
+  const rows = body.result || []
+  return rows.filter((row) => {
+    const payload = row?.payload || {}
+    const sourceScope = String(payload.source_scope || 'personal')
+    if (scope === 'company') return sourceScope === 'company'
+    if (scope === 'personal') {
+      return sourceScope === 'personal' && String(payload.owner_user_id || '') === ownerUserId
+    }
+    return sourceScope === 'company'
+      || (sourceScope === 'personal' && String(payload.owner_user_id || '') === ownerUserId)
+  })
 }
