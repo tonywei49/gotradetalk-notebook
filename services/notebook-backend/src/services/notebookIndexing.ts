@@ -17,7 +17,7 @@ import {
 } from '../repos/notebookRepo.js'
 import { splitIntoChunks } from './notebookChunking.js'
 import { createEmbedding, getNotebookAiConfig, rerankCandidates } from './notebookLlm.js'
-import { deleteNotebookPointsByItem, ensureQdrantCollection, searchNotebookVectors, upsertNotebookPoints } from './notebookQdrant.js'
+import { deleteNotebookPointsByItem, ensureQdrantCollection, getQdrantConfig, searchNotebookVectors, upsertNotebookPoints } from './notebookQdrant.js'
 import { enqueueNotebookJobId } from './notebookQueue.js'
 import { extractItemSources, type IndexItemFileRow, type IndexItemRow } from './sourceExtractors.js'
 
@@ -108,6 +108,11 @@ export async function runNotebookIndexJob(jobId: string, options?: { matrixBaseU
       const points = [] as Array<{ id: string; vector: number[]; payload: Record<string, unknown> }>
       for (const chunk of chunks) {
         const vector = await createEmbedding(aiConfig, chunk.text)
+        const expectedDim = getQdrantConfig().vectorSize
+        if (vector.length !== expectedDim) {
+          const detail = `EMBEDDING_DIM_MISMATCH: expected ${expectedDim} got ${vector.length}`
+          throw new Error(detail)
+        }
         points.push({
           id: randomUUID(),
           vector,
@@ -228,6 +233,10 @@ export async function hybridSearchNotebook(params: {
 
   const aiConfig = await getNotebookAiConfig(params.companyId)
   const vector = await createEmbedding(aiConfig, params.query)
+  const expectedDim = getQdrantConfig().vectorSize
+  if (vector.length !== expectedDim) {
+    throw new Error(`EMBEDDING_DIM_MISMATCH: expected ${expectedDim} got ${vector.length}`)
+  }
   const vectorHits = await searchNotebookVectors(params.companyId, params.ownerUserId, vector, topK * 2)
 
   const vectorList: Array<{ key: string; item_id: string; snippet: string; source_locator: string | null; base_score: number }> = []

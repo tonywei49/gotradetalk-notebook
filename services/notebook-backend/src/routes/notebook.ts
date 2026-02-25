@@ -68,6 +68,9 @@ function sendAiRuntimeError(res: Response, message: string) {
   if (message === 'CAPABILITY_DISABLED') return sendNotebookError(res, 403, 'CAPABILITY_DISABLED')
   if (message === 'CAPABILITY_EXPIRED') return sendNotebookError(res, 403, 'CAPABILITY_EXPIRED')
   if (message === 'QUOTA_EXCEEDED') return sendNotebookError(res, 429, 'QUOTA_EXCEEDED')
+  if (message.startsWith('EMBEDDING_DIM_MISMATCH')) {
+    return sendNotebookError(res, 400, 'EMBEDDING_DIM_MISMATCH', message)
+  }
   return sendNotebookError(res, 400, 'MODEL_ERROR', message || 'MODEL_ERROR')
 }
 

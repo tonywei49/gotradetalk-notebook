@@ -4,7 +4,7 @@ export type QdrantPoint = {
   payload: Record<string, unknown>
 }
 
-function getQdrantConfig() {
+export function getQdrantConfig() {
   const baseUrl = String(process.env.QDRANT_URL || '').trim()
   const apiKey = String(process.env.QDRANT_API_KEY || '').trim()
   const collection = String(process.env.QDRANT_NOTEBOOK_COLLECTION || 'notebook_chunks_v1').trim()
@@ -30,7 +30,14 @@ export async function ensureQdrantCollection() {
 
   const headers = buildHeaders(apiKey)
   const getResp = await fetch(`${baseUrl}/collections/${encodeURIComponent(collection)}`, { headers })
-  if (getResp.ok) return
+  if (getResp.ok) {
+    const body = await getResp.json().catch(() => null) as { result?: { config?: { params?: { vectors?: { size?: number } } } } }
+    const existingSize = body?.result?.config?.params?.vectors?.size
+    if (typeof existingSize === 'number' && existingSize !== vectorSize) {
+      throw new Error(`EMBEDDING_DIM_MISMATCH: expected ${vectorSize} got ${existingSize}`)
+    }
+    return
+  }
 
   await fetch(`${baseUrl}/collections/${encodeURIComponent(collection)}`, {
     method: 'PUT',
@@ -47,6 +54,12 @@ export async function ensureQdrantCollection() {
 export async function upsertNotebookPoints(points: QdrantPoint[]) {
   const { baseUrl, apiKey, collection } = getQdrantConfig()
   if (!baseUrl || points.length === 0) return
+
+  const expectedDim = getQdrantConfig().vectorSize
+  const first = points[0]?.vector || []
+  if (first.length !== expectedDim) {
+    throw new Error(`EMBEDDING_DIM_MISMATCH: expected ${expectedDim} got ${first.length}`)
+  }
 
   const headers = buildHeaders(apiKey)
   const resp = await fetch(`${baseUrl}/collections/${encodeURIComponent(collection)}/points?wait=true`, {
