@@ -85,7 +85,7 @@ export async function resolveNotebookAccessContext(req: Request): Promise<Notebo
 
   const capabilities = [NOTEBOOK_BASIC_CAPABILITY]
 
-  if ((role === 'staff' || role === 'admin') && policy.notebook_ai_enabled) {
+  if (policy.notebook_ai_enabled) {
     capabilities.push(NOTEBOOK_LLM_ASSIST_CAPABILITY)
   }
 
@@ -111,11 +111,6 @@ export function ensureNotebookBasic(context: NotebookAccessContext, res: Respons
 }
 
 export function ensureAssistAllowed(context: NotebookAccessContext, res: Response): boolean {
-  if (context.role === 'client') {
-    sendNotebookError(res, 403, 'FORBIDDEN_ROLE')
-    return false
-  }
-
   if (context.policy.runtime_rejection_code === 'QUOTA_EXCEEDED') {
     sendNotebookError(res, 429, 'QUOTA_EXCEEDED')
     return false
