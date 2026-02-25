@@ -88,6 +88,16 @@ export async function getMeCapabilities(req: Request, res: Response) {
     return sendNotebookError(res, 401, 'UNAUTHORIZED')
   }
 
+  if (context.policy.runtime_rejection_code === 'QUOTA_EXCEEDED') {
+    return sendNotebookError(res, 429, 'QUOTA_EXCEEDED')
+  }
+  if (context.policy.runtime_rejection_code === 'CAPABILITY_EXPIRED') {
+    return sendNotebookError(res, 403, 'CAPABILITY_EXPIRED')
+  }
+  if (context.policy.runtime_rejection_code === 'CAPABILITY_DISABLED') {
+    return sendNotebookError(res, 403, 'CAPABILITY_DISABLED')
+  }
+
   return res.json({
     user_id: context.userId,
     company_id: context.companyId,
