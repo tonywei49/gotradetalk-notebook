@@ -12,7 +12,8 @@ export type VisionProviderInput = {
 }
 
 function normalizeBaseUrl(value: string): string {
-  return value.endsWith('/') ? value.slice(0, -1) : value
+  const trimmed = value.endsWith('/') ? value.slice(0, -1) : value
+  return trimmed.endsWith('/v1') ? trimmed.slice(0, -3) : trimmed
 }
 
 function extractTextFromChatContent(content: unknown): string {

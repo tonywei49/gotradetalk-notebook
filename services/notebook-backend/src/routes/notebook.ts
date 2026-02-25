@@ -68,7 +68,7 @@ function sendAiRuntimeError(res: Response, message: string) {
   if (message === 'CAPABILITY_DISABLED') return sendNotebookError(res, 403, 'CAPABILITY_DISABLED')
   if (message === 'CAPABILITY_EXPIRED') return sendNotebookError(res, 403, 'CAPABILITY_EXPIRED')
   if (message === 'QUOTA_EXCEEDED') return sendNotebookError(res, 429, 'QUOTA_EXCEEDED')
-  return sendNotebookError(res, 502, 'MODEL_ERROR', message || 'MODEL_ERROR')
+  return sendNotebookError(res, 400, 'MODEL_ERROR', message || 'MODEL_ERROR')
 }
 
 async function withItemFiles<T extends { id: string }>(context: { companyId: string; userId: string }, item: T | null) {

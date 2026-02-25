@@ -69,6 +69,20 @@ function normalizeBaseUrl(value: string) {
   return value.endsWith('/') ? value.slice(0, -1) : value
 }
 
+function normalizeApiBaseUrl(value: string) {
+  let normalized = normalizeBaseUrl(value)
+  if (normalized.endsWith('/v1')) {
+    normalized = normalized.slice(0, -3)
+  }
+  return normalized
+}
+
+function wrapProviderError(provider: string, message: string) {
+  const detail = message || 'MODEL_ERROR'
+  if (detail.startsWith('MODEL_ERROR(provider=')) return detail
+  return `MODEL_ERROR(provider=${provider}): ${detail}`
+}
+
 export async function getNotebookAiConfig(companyId: string): Promise<NotebookAiConfig> {
   const runtimePolicy = await resolveAiRuntimePolicy({
     subjectType: 'company',
@@ -95,15 +109,15 @@ export async function getNotebookAiConfig(companyId: string): Promise<NotebookAi
 
   return {
     enabled: true,
-    chatBaseUrl: normalizeBaseUrl(String(getConfigValue('chat_base_url', 'notebook_ai_chat_base_url') || data?.notebook_ai_chat_base_url || defaultBaseUrl)),
+    chatBaseUrl: normalizeApiBaseUrl(String(getConfigValue('chat_base_url', 'notebook_ai_chat_base_url') || data?.notebook_ai_chat_base_url || defaultBaseUrl)),
     chatApiKey: String(getConfigValue('chat_api_key', 'notebook_ai_chat_api_key') || data?.notebook_ai_chat_api_key || ''),
-    embeddingBaseUrl: normalizeBaseUrl(String(getConfigValue('embedding_base_url', 'notebook_ai_embedding_base_url') || data?.notebook_ai_embedding_base_url || defaultBaseUrl)),
+    embeddingBaseUrl: normalizeApiBaseUrl(String(getConfigValue('embedding_base_url', 'notebook_ai_embedding_base_url') || data?.notebook_ai_embedding_base_url || defaultBaseUrl)),
     embeddingApiKey: String(getConfigValue('embedding_api_key', 'notebook_ai_embedding_api_key') || data?.notebook_ai_embedding_api_key || ''),
-    rerankBaseUrl: normalizeBaseUrl(String(getConfigValue('rerank_base_url', 'notebook_ai_rerank_base_url') || data?.notebook_ai_rerank_base_url || defaultBaseUrl)),
+    rerankBaseUrl: normalizeApiBaseUrl(String(getConfigValue('rerank_base_url', 'notebook_ai_rerank_base_url') || data?.notebook_ai_rerank_base_url || defaultBaseUrl)),
     rerankApiKey: String(getConfigValue('rerank_api_key', 'notebook_ai_rerank_api_key') || data?.notebook_ai_rerank_api_key || ''),
-    ocrBaseUrl: normalizeBaseUrl(String(getConfigValue('ocr_base_url', 'notebook_ai_ocr_base_url') || data?.notebook_ai_ocr_base_url || defaultBaseUrl)),
+    ocrBaseUrl: normalizeApiBaseUrl(String(getConfigValue('ocr_base_url', 'notebook_ai_ocr_base_url') || data?.notebook_ai_ocr_base_url || defaultBaseUrl)),
     ocrApiKey: String(getConfigValue('ocr_api_key', 'notebook_ai_ocr_api_key') || data?.notebook_ai_ocr_api_key || ''),
-    visionBaseUrl: normalizeBaseUrl(String(
+    visionBaseUrl: normalizeApiBaseUrl(String(
       getConfigValue('vision_base_url', 'notebook_ai_vision_base_url')
       || getConfigValue('chat_base_url', 'notebook_ai_chat_base_url')
       || data?.notebook_ai_vision_base_url
@@ -154,21 +168,26 @@ export async function createEmbedding(config: NotebookAiConfig, text: string): P
     throw new Error('CAPABILITY_DISABLED')
   }
 
-  const resp = await fetch(`${config.embeddingBaseUrl}/v1/embeddings`, {
-    method: 'POST',
-    headers: authHeaders(config.embeddingApiKey),
-    body: JSON.stringify({ model: config.embeddingModel, input: text })
-  })
+  let resp: Response
+  try {
+    resp = await fetch(`${config.embeddingBaseUrl}/v1/embeddings`, {
+      method: 'POST',
+      headers: authHeaders(config.embeddingApiKey),
+      body: JSON.stringify({ model: config.embeddingModel, input: text })
+    })
+  } catch (error: any) {
+    throw new Error(wrapProviderError('embedding', error?.message || 'REQUEST_FAILED'))
+  }
 
   if (!resp.ok) {
     const body = await resp.text()
-    throw new Error(`EMBEDDING_FAILED: ${resp.status} ${body}`)
+    throw new Error(wrapProviderError('embedding', `${resp.status} ${body}`))
   }
 
   const body = await resp.json() as { data?: Array<{ embedding?: number[] }> }
   const vector = body.data?.[0]?.embedding
   if (!Array.isArray(vector) || vector.length === 0) {
-    throw new Error('EMBEDDING_EMPTY')
+    throw new Error(wrapProviderError('embedding', 'EMBEDDING_EMPTY'))
   }
 
   return vector
@@ -236,22 +255,27 @@ export async function generateAssistAnswer(
     languageInstruction
   ].join('\n\n')
 
-  const resp = await fetch(`${config.chatBaseUrl}/v1/chat/completions`, {
-    method: 'POST',
-    headers: authHeaders(config.chatApiKey),
-    body: JSON.stringify({
-      model: config.chatModel,
-      temperature: 0.2,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ]
+  let resp: Response
+  try {
+    resp = await fetch(`${config.chatBaseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: authHeaders(config.chatApiKey),
+      body: JSON.stringify({
+        model: config.chatModel,
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ]
+      })
     })
-  })
+  } catch (error: any) {
+    throw new Error(wrapProviderError('chat', error?.message || 'REQUEST_FAILED'))
+  }
 
   if (!resp.ok) {
     const body = await resp.text()
-    throw new Error(`MODEL_ERROR: ${resp.status} ${body}`)
+    throw new Error(wrapProviderError('chat', `${resp.status} ${body}`))
   }
 
   const body = await resp.json() as { choices?: Array<{ message?: { content?: string } }> }
