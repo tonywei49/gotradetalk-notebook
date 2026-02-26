@@ -232,6 +232,15 @@
   - company 側 provider/key/model 更新 API 改為 `MANAGED_BY_PLATFORM`
 - 對應 UAT: `UAT-14`, `UAT-08`
 
+### AD-05 公司知識庫（Company Knowledge Base）
+- [x] 進度: 已完成（公司管理台 + 平台代理 API + 最小 E2E）
+- 內容:
+  - 公司管理台新增公司知識庫管理（上傳、列表、下線、刪除、重試索引）
+  - hub-backend 新增公司端/平台端公司知識庫代理 API（透過 notebook internal secret）
+  - 審計寫入 `admin_audit_logs`（upload/delete/offline/retry）
+  - 嚴格沿用能力/策略閘門（`notebook enabled/expire`）
+- 對應 UAT: `UAT-03`, `UAT-05`, `UAT-14`
+
 ## 2.3 UI（gotradetalk-ui）
 
 ### UI-01 左側 Notebook 模組頁

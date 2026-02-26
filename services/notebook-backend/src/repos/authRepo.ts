@@ -51,6 +51,28 @@ export async function getProfileById(profileId: string): Promise<ProfileRow | nu
   return result.rows[0] || null
 }
 
+export async function upsertInternalProfile(params: {
+  profileId: string
+  companyId: string
+  userType?: 'admin' | 'staff' | 'client'
+  userLocalId?: string | null
+}): Promise<void> {
+  await dbQuery(
+    `insert into public.profiles (id, company_id, user_type, user_local_id)
+     values ($1, $2, $3, $4)
+     on conflict (id) do update
+       set company_id = excluded.company_id,
+           user_type = excluded.user_type,
+           user_local_id = coalesce(excluded.user_local_id, public.profiles.user_local_id)`,
+    [
+      params.profileId,
+      params.companyId,
+      params.userType || 'admin',
+      params.userLocalId || null
+    ]
+  )
+}
+
 export async function getProfileByMatrixUserId(matrixUserId: string): Promise<ProfileRow | null> {
   const result = await dbQuery<ProfileRow>(
     `select id, company_id, user_type, auth_user_id, user_local_id, matrix_user_id

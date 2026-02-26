@@ -26,6 +26,13 @@ import {
 } from './routes/notebook.js'
 import { getInternalNotebookAiSettings, upsertInternalNotebookAiSettings } from './routes/internalNotebookSettings.js'
 import {
+  createInternalCompanyKnowledgeItem,
+  deleteInternalCompanyKnowledgeItem,
+  listInternalCompanyKnowledgeItems,
+  offlineInternalCompanyKnowledgeItem,
+  retryInternalCompanyKnowledgeIndex
+} from './routes/internalCompanyKnowledge.js'
+import {
   getCompanyNotebookAiSettings,
   getCompanyTranslationSettings,
   rejectManagedNotebookAiUpdate,
@@ -99,6 +106,11 @@ app.get('/notebook/sync/pull', requireHubUser, syncPull)
 
 app.get('/internal/company/settings/notebook-ai', getInternalNotebookAiSettings)
 app.put('/internal/company/settings/notebook-ai', upsertInternalNotebookAiSettings)
+app.get('/internal/company/knowledge/items', listInternalCompanyKnowledgeItems)
+app.post('/internal/company/knowledge/items', createInternalCompanyKnowledgeItem)
+app.delete('/internal/company/knowledge/items/:id', deleteInternalCompanyKnowledgeItem)
+app.post('/internal/company/knowledge/items/:id/offline', offlineInternalCompanyKnowledgeItem)
+app.post('/internal/company/knowledge/items/:id/retry-index', retryInternalCompanyKnowledgeIndex)
 
 app.listen(port, () => {
   console.log(`Notebook backend listening on :${port}`)
