@@ -655,7 +655,7 @@ export async function searchChunksByQuery(params: {
   const scopeClause = scope === 'personal'
     ? `and i.source_scope = 'personal' and i.owner_user_id = $2 and c.owner_user_id = $2`
     : scope === 'company'
-    ? `and i.source_scope = 'company'`
+    ? `and i.source_scope = 'company' and $2::uuid is not null`
     : `and (i.source_scope = 'company' or (i.source_scope = 'personal' and i.owner_user_id = $2 and c.owner_user_id = $2))`
 
   const ftsResult = await dbQuery<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number; source_scope: 'personal' | 'company'; source_file_name: string | null }>(
@@ -752,7 +752,7 @@ export async function getNotebookItemSources(
   const scopeClause = scope === 'personal'
     ? `and source_scope = 'personal' and owner_user_id = $2`
     : scope === 'company'
-    ? `and source_scope = 'company'`
+    ? `and source_scope = 'company' and $2::uuid is not null`
     : `and (source_scope = 'company' or (source_scope = 'personal' and owner_user_id = $2))`
   const result = await dbQuery<{ id: string; title: string | null; source_scope: 'personal' | 'company'; source_file_name: string | null }>(
     `select id::text as id, title, source_scope::text as source_scope, matrix_media_name as source_file_name
@@ -775,7 +775,7 @@ export async function getIndexableActiveItemIdSet(
   const scopeClause = scope === 'personal'
     ? `and source_scope = 'personal' and owner_user_id = $2`
     : scope === 'company'
-    ? `and source_scope = 'company'`
+    ? `and source_scope = 'company' and $2::uuid is not null`
     : `and (source_scope = 'company' or (source_scope = 'personal' and owner_user_id = $2))`
 
   const result = await dbQuery<{ id: string }>(
