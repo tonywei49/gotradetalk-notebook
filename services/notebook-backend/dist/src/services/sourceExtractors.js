@@ -1,5 +1,12 @@
 import { fetchMatrixMediaBuffer, parseDocument } from './notebookParsing.js';
 import { runImageOcr } from './ocrPipeline.js';
+import { runImageVisionCaption } from './visionPipeline.js';
+function buildInlineTextSource(item) {
+    const text = `${item.title || ''}\n${item.content_markdown || ''}`.trim();
+    if (!text)
+        return null;
+    return { text, sourceType: 'text', sourceLocator: null };
+}
 function isImageSource(mime, fileName) {
     const normalizedMime = String(mime || '').toLowerCase();
     const normalizedName = String(fileName || '').toLowerCase();
@@ -22,8 +29,40 @@ async function extractSingleFileSource(params) {
             fileName: file.matrix_media_name,
             config: params.ocr
         });
+        let visionCaption = null;
+        try {
+            visionCaption = await runImageVisionCaption({
+                image: media,
+                mimeType: String(file.matrix_media_mime || 'image/jpeg'),
+                fileName: file.matrix_media_name,
+                config: {
+                    baseUrl: params.vision.baseUrl,
+                    apiKey: params.vision.apiKey,
+                    model: params.vision.model
+                }
+            });
+            if (!visionCaption) {
+                visionCaption = await runImageVisionCaption({
+                    image: media,
+                    mimeType: String(file.matrix_media_mime || 'image/jpeg'),
+                    fileName: file.matrix_media_name,
+                    config: {
+                        baseUrl: params.vision.fallbackBaseUrl,
+                        apiKey: params.vision.fallbackApiKey,
+                        model: params.vision.fallbackModel
+                    }
+                });
+            }
+        }
+        catch {
+            visionCaption = null;
+        }
+        const combinedText = [
+            ocrResult.text ? `OCR:\n${ocrResult.text}` : '',
+            visionCaption ? `Vision:\n${visionCaption}` : ''
+        ].filter(Boolean).join('\n\n');
         return {
-            text: ocrResult.text,
+            text: combinedText || ocrResult.text,
             sourceType: 'image_ocr',
             sourceLocator: file.matrix_media_name || file.matrix_media_mxc
         };
@@ -38,25 +77,29 @@ async function extractSingleFileSource(params) {
 export async function extractItemSources(params) {
     const item = params.item;
     if (item.item_type === 'text') {
-        const text = `${item.title || ''}\n${item.content_markdown || ''}`.trim();
-        return [{ text, sourceType: 'text', sourceLocator: null }];
+        const inlineSource = buildInlineTextSource(item);
+        return inlineSource ? [inlineSource] : [];
     }
+    const outputs = [];
+    const inlineSource = buildInlineTextSource(item);
+    if (inlineSource)
+        outputs.push(inlineSource);
     const files = (params.files || [])
         .filter((file) => file.is_indexable && Boolean(file.matrix_media_mxc));
     if (files.length > 0) {
-        const outputs = [];
         for (const file of files) {
             outputs.push(await extractSingleFileSource({
                 file,
                 matrixBaseUrl: params.matrixBaseUrl,
                 accessToken: params.accessToken,
-                ocr: params.ocr
+                ocr: params.ocr,
+                vision: params.vision
             }));
         }
         return outputs;
     }
     if (!item.is_indexable || !item.matrix_media_mxc) {
-        return [];
+        return outputs;
     }
     const fallback = await extractSingleFileSource({
         file: {
@@ -68,7 +111,9 @@ export async function extractItemSources(params) {
         },
         matrixBaseUrl: params.matrixBaseUrl,
         accessToken: params.accessToken,
-        ocr: params.ocr
+        ocr: params.ocr,
+        vision: params.vision
     });
-    return [fallback];
+    outputs.push(fallback);
+    return outputs;
 }

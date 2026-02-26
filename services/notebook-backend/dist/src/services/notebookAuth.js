@@ -1,7 +1,12 @@
 import { getCompanySettings, getProfileById } from '../repos/authRepo.js';
+import { resolveAiRuntimePolicy } from './aiRuntimePolicy.js';
 export const NOTEBOOK_BASIC_CAPABILITY = 'NOTEBOOK_BASIC';
 export const NOTEBOOK_LLM_ASSIST_CAPABILITY = 'NOTEBOOK_LLM_ASSIST';
 export const NOTEBOOK_RAG_ADMIN_CAPABILITY = 'NOTEBOOK_RAG_ADMIN';
+function isCompanyAdminMember(user, companyId) {
+    const adminRoles = new Set(['admin', 'owner', 'company_admin']);
+    return (user.memberships || []).some((m) => String(m.company_id || '') === companyId && adminRoles.has(String(m.role || '').toLowerCase()));
+}
 function toRole(userType, isEmployee) {
     if (userType === 'admin')
         return 'admin';
@@ -29,9 +34,21 @@ export async function resolveNotebookAccessContext(req) {
         return null;
     }
     const role = toRole(profile.user_type || user.userType, user.isEmployee);
+    const isCompanyAdmin = role === 'admin' || isCompanyAdminMember(user, companyId);
     const settings = await getCompanySettings(companyId);
+    const runtimePolicy = await resolveAiRuntimePolicy({
+        subjectType: 'company',
+        subjectId: companyId,
+        capabilityType: 'notebook_ai'
+    });
     const policy = {
-        notebook_ai_enabled: Boolean(settings?.notebook_ai_enabled),
+        managed_by_platform: true,
+        notebook_ai_enabled: runtimePolicy.rejectionCode == null,
+        notebook_ai_expire_at: runtimePolicy.expireAt,
+        notebook_ai_quota_monthly_requests: runtimePolicy.quotaMonthlyRequests,
+        notebook_ai_quota_used_monthly_requests: runtimePolicy.quotaUsedMonthlyRequests,
+        runtime_policy_source: runtimePolicy.source,
+        runtime_rejection_code: runtimePolicy.rejectionCode,
         allow_low_confidence_send: Boolean(settings?.notebook_ai_allow_low_confidence_send),
         retrieval_top_k: Number(settings?.notebook_ai_retrieval_top_k || 5),
         score_threshold: Number(settings?.notebook_ai_score_threshold || 0.35),
@@ -39,7 +56,7 @@ export async function resolveNotebookAccessContext(req) {
         ocr_enabled: Boolean(settings?.notebook_ai_ocr_enabled)
     };
     const capabilities = [NOTEBOOK_BASIC_CAPABILITY];
-    if ((role === 'staff' || role === 'admin') && policy.notebook_ai_enabled) {
+    if (policy.notebook_ai_enabled) {
         capabilities.push(NOTEBOOK_LLM_ASSIST_CAPABILITY);
     }
     if (role === 'admin') {
@@ -49,6 +66,7 @@ export async function resolveNotebookAccessContext(req) {
         userId: user.id,
         companyId,
         role,
+        isCompanyAdmin,
         capabilities: dedupeCapabilities(capabilities),
         policy
     };
@@ -61,11 +79,15 @@ export function ensureNotebookBasic(context, res) {
     return true;
 }
 export function ensureAssistAllowed(context, res) {
-    if (context.role === 'client') {
-        sendNotebookError(res, 403, 'FORBIDDEN_ROLE');
+    if (context.policy.runtime_rejection_code === 'QUOTA_EXCEEDED') {
+        sendNotebookError(res, 429, 'QUOTA_EXCEEDED');
         return false;
     }
-    if (!context.capabilities.includes(NOTEBOOK_LLM_ASSIST_CAPABILITY)) {
+    if (context.policy.runtime_rejection_code === 'CAPABILITY_EXPIRED') {
+        sendNotebookError(res, 403, 'CAPABILITY_EXPIRED');
+        return false;
+    }
+    if (!context.capabilities.includes(NOTEBOOK_LLM_ASSIST_CAPABILITY) || context.policy.runtime_rejection_code === 'CAPABILITY_DISABLED') {
         sendNotebookError(res, 403, 'CAPABILITY_DISABLED');
         return false;
     }

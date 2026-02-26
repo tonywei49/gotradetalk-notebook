@@ -1,4 +1,4 @@
-function getQdrantConfig() {
+export function getQdrantConfig() {
     const baseUrl = String(process.env.QDRANT_URL || '').trim();
     const apiKey = String(process.env.QDRANT_API_KEY || '').trim();
     const collection = String(process.env.QDRANT_NOTEBOOK_COLLECTION || 'notebook_chunks_v1').trim();
@@ -21,8 +21,14 @@ export async function ensureQdrantCollection() {
         return;
     const headers = buildHeaders(apiKey);
     const getResp = await fetch(`${baseUrl}/collections/${encodeURIComponent(collection)}`, { headers });
-    if (getResp.ok)
+    if (getResp.ok) {
+        const body = await getResp.json().catch(() => null);
+        const existingSize = body?.result?.config?.params?.vectors?.size;
+        if (typeof existingSize === 'number' && existingSize !== vectorSize) {
+            throw new Error(`EMBEDDING_DIM_MISMATCH: expected ${vectorSize} got ${existingSize}`);
+        }
         return;
+    }
     await fetch(`${baseUrl}/collections/${encodeURIComponent(collection)}`, {
         method: 'PUT',
         headers,
@@ -38,6 +44,11 @@ export async function upsertNotebookPoints(points) {
     const { baseUrl, apiKey, collection } = getQdrantConfig();
     if (!baseUrl || points.length === 0)
         return;
+    const expectedDim = getQdrantConfig().vectorSize;
+    const first = points[0]?.vector || [];
+    if (first.length !== expectedDim) {
+        throw new Error(`EMBEDDING_DIM_MISMATCH: expected ${expectedDim} got ${first.length}`);
+    }
     const headers = buildHeaders(apiKey);
     const resp = await fetch(`${baseUrl}/collections/${encodeURIComponent(collection)}/points?wait=true`, {
         method: 'PUT',
@@ -74,7 +85,7 @@ export async function deleteNotebookPointsByItem(companyId, itemId) {
         throw new Error(`QDRANT_DELETE_FAILED: ${resp.status} ${text}`);
     }
 }
-export async function searchNotebookVectors(companyId, ownerUserId, vector, limit = 10) {
+export async function searchNotebookVectors(companyId, ownerUserId, vector, limit = 10, scope = 'both') {
     const { baseUrl, apiKey, collection } = getQdrantConfig();
     if (!baseUrl || vector.length === 0)
         return [];
@@ -88,8 +99,7 @@ export async function searchNotebookVectors(companyId, ownerUserId, vector, limi
             with_payload: true,
             filter: {
                 must: [
-                    { key: 'company_id', match: { value: companyId } },
-                    { key: 'owner_user_id', match: { value: ownerUserId } }
+                    { key: 'company_id', match: { value: companyId } }
                 ]
             }
         })
@@ -99,5 +109,16 @@ export async function searchNotebookVectors(companyId, ownerUserId, vector, limi
         throw new Error(`QDRANT_SEARCH_FAILED: ${resp.status} ${text}`);
     }
     const body = await resp.json();
-    return body.result || [];
+    const rows = body.result || [];
+    return rows.filter((row) => {
+        const payload = row?.payload || {};
+        const sourceScope = String(payload.source_scope || 'personal');
+        if (scope === 'company')
+            return sourceScope === 'company';
+        if (scope === 'personal') {
+            return sourceScope === 'personal' && String(payload.owner_user_id || '') === ownerUserId;
+        }
+        return sourceScope === 'company'
+            || (sourceScope === 'personal' && String(payload.owner_user_id || '') === ownerUserId);
+    });
 }

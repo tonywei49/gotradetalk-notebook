@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto';
-import { createIndexJob, deleteChunksByItem, getIndexJobById, listActiveNotebookItemFilesByItem, getNotebookItemByCompany, getNotebookItemTitles, listPendingIndexJobIds, markIndexJobFailed, markIndexJobRunning, markIndexJobSuccess, replaceItemChunks, searchChunksByQuery, upsertItemIndexState } from '../repos/notebookRepo.js';
+import { createIndexJob, deleteChunksByItem, getIndexJobById, listActiveNotebookItemFilesByItem, getNotebookItemByCompany, getIndexableActiveItemIdSet, getNotebookItemSources, listPendingIndexJobIds, markIndexJobFailed, markIndexJobRunning, markIndexJobSuccess, replaceItemChunks, searchChunksByQuery, upsertItemIndexState } from '../repos/notebookRepo.js';
 import { splitIntoChunks } from './notebookChunking.js';
 import { createEmbedding, getNotebookAiConfig, rerankCandidates } from './notebookLlm.js';
-import { deleteNotebookPointsByItem, ensureQdrantCollection, searchNotebookVectors, upsertNotebookPoints } from './notebookQdrant.js';
+import { deleteNotebookPointsByItem, ensureQdrantCollection, getQdrantConfig, searchNotebookVectors, upsertNotebookPoints } from './notebookQdrant.js';
 import { enqueueNotebookJobId } from './notebookQueue.js';
 import { extractItemSources } from './sourceExtractors.js';
 const STRONG_SIGNAL_MIN_SCORE = 0.82;
@@ -42,6 +42,14 @@ export async function runNotebookIndexJob(jobId, options) {
                     baseUrl: aiConfig.ocrBaseUrl,
                     apiKey: aiConfig.ocrApiKey,
                     model: aiConfig.ocrModel
+                },
+                vision: {
+                    baseUrl: aiConfig.visionBaseUrl,
+                    apiKey: aiConfig.visionApiKey,
+                    model: aiConfig.visionModel,
+                    fallbackBaseUrl: aiConfig.chatBaseUrl,
+                    fallbackApiKey: aiConfig.chatApiKey,
+                    fallbackModel: aiConfig.chatModel
                 }
             });
             let chunkIndexOffset = 0;
@@ -66,6 +74,11 @@ export async function runNotebookIndexJob(jobId, options) {
             const points = [];
             for (const chunk of chunks) {
                 const vector = await createEmbedding(aiConfig, chunk.text);
+                const expectedDim = getQdrantConfig().vectorSize;
+                if (vector.length !== expectedDim) {
+                    const detail = `EMBEDDING_DIM_MISMATCH: expected ${expectedDim} got ${vector.length}`;
+                    throw new Error(detail);
+                }
                 points.push({
                     id: randomUUID(),
                     vector,
@@ -74,6 +87,7 @@ export async function runNotebookIndexJob(jobId, options) {
                         item_id: item.id,
                         company_id: item.company_id,
                         owner_user_id: item.owner_user_id,
+                        source_scope: item.source_scope,
                         chunk_index: chunk.chunkIndex,
                         content_hash: chunk.contentHash,
                         source_type: chunk.sourceType,
@@ -131,6 +145,7 @@ export async function hybridSearchNotebook(params) {
     const bmRows = await searchChunksByQuery({
         companyId: params.companyId,
         ownerUserId: params.ownerUserId,
+        scope: params.scope,
         query: params.query,
         limit: topK * 4
     });
@@ -153,10 +168,13 @@ export async function hybridSearchNotebook(params) {
             }
         }
         const lexicalCandidates = Array.from(lexicalByKey.values()).slice(0, topK);
-        const titleMap = await getNotebookItemTitles(params.companyId, params.ownerUserId, Array.from(new Set(lexicalCandidates.map((c) => c.item_id))));
+        const sourceMap = await getNotebookItemSources(params.companyId, params.ownerUserId, Array.from(new Set(lexicalCandidates.map((c) => c.item_id))), params.scope);
         return lexicalCandidates.map((row) => ({
             item_id: row.item_id,
-            title: titleMap.get(row.item_id) || null,
+            source_scope: (sourceMap.get(row.item_id)?.source_scope || 'personal'),
+            source_title: sourceMap.get(row.item_id)?.title || null,
+            title: sourceMap.get(row.item_id)?.title || null,
+            source_file_name: sourceMap.get(row.item_id)?.source_file_name || null,
             snippet: row.snippet,
             source_locator: row.source_locator,
             score: row.score
@@ -164,7 +182,11 @@ export async function hybridSearchNotebook(params) {
     }
     const aiConfig = await getNotebookAiConfig(params.companyId);
     const vector = await createEmbedding(aiConfig, params.query);
-    const vectorHits = await searchNotebookVectors(params.companyId, params.ownerUserId, vector, topK * 2);
+    const expectedDim = getQdrantConfig().vectorSize;
+    if (vector.length !== expectedDim) {
+        throw new Error(`EMBEDDING_DIM_MISMATCH: expected ${expectedDim} got ${vector.length}`);
+    }
+    const vectorHits = await searchNotebookVectors(params.companyId, params.ownerUserId, vector, topK * 2, params.scope);
     const vectorList = [];
     const bm25List = [];
     const candidatesByKey = new Map();
@@ -207,6 +229,12 @@ export async function hybridSearchNotebook(params) {
             });
         }
     }
+    const allowedItemIds = await getIndexableActiveItemIdSet(params.companyId, params.ownerUserId, Array.from(new Set(Array.from(candidatesByKey.values()).map((c) => c.item_id))), params.scope);
+    for (const [key, value] of Array.from(candidatesByKey.entries())) {
+        if (!allowedItemIds.has(value.item_id)) {
+            candidatesByKey.delete(key);
+        }
+    }
     const fusedScores = reciprocalRankFusion([vectorList, bm25List], [1.2, 1.0]);
     for (const [key, retrieval] of candidatesByKey.entries()) {
         const fused = fusedScores.get(key) || 0;
@@ -229,12 +257,15 @@ export async function hybridSearchNotebook(params) {
         const blendedScore = retrievalWeight * retrievalNorm + (1 - retrievalWeight) * Number(row.score || 0);
         return { ...row, score: blendedScore };
     }).sort((a, b) => b.score - a.score);
-    const titleMap = await getNotebookItemTitles(params.companyId, params.ownerUserId, Array.from(new Set(candidates.map((c) => c.item_id))));
+    const sourceMap = await getNotebookItemSources(params.companyId, params.ownerUserId, Array.from(new Set(candidates.map((c) => c.item_id))), params.scope);
     return blended.slice(0, topK).map((row) => {
         const candidate = candidates[row.index];
         return {
             item_id: candidate.item_id,
-            title: titleMap.get(candidate.item_id) || null,
+            source_scope: (sourceMap.get(candidate.item_id)?.source_scope || 'personal'),
+            source_title: sourceMap.get(candidate.item_id)?.title || null,
+            title: sourceMap.get(candidate.item_id)?.title || null,
+            source_file_name: sourceMap.get(candidate.item_id)?.source_file_name || null,
             snippet: candidate.snippet,
             source_locator: candidate.source_locator,
             score: row.score

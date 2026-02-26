@@ -17,14 +17,12 @@ function extractTextFromChatContent(content) {
         .filter(Boolean);
     return lines.join('\n').trim();
 }
-// Provider adapter entry point. We keep this isolated so the OCR vendor/API
-// can be swapped without changing indexing code.
-export async function runOcrProvider(input) {
+export async function runVisionProvider(input) {
     const baseUrl = normalizeBaseUrl(String(input.config.baseUrl || '').trim());
     const apiKey = String(input.config.apiKey || '').trim();
     const model = String(input.config.model || '').trim();
     if (!baseUrl || !apiKey || !model) {
-        throw new Error('OCR_CONFIG_INCOMPLETE');
+        throw new Error('VISION_CONFIG_INCOMPLETE');
     }
     const imageData = input.image.toString('base64');
     const imageUrl = `data:${input.mimeType || 'image/jpeg'};base64,${imageData}`;
@@ -43,12 +41,12 @@ export async function runOcrProvider(input) {
                 messages: [
                     {
                         role: 'system',
-                        content: '你是OCR助手。只输出图片中的可读文字，不要解释，不要补充。'
+                        content: '你是圖片理解助手。請簡短描述圖片中的場景、物件與可讀文字，不要臆測。'
                     },
                     {
                         role: 'user',
                         content: [
-                            { type: 'text', text: '请提取这张图片中的文字内容。' },
+                            { type: 'text', text: '請描述這張圖片的內容，並包含可見文字。' },
                             { type: 'image_url', image_url: { url: imageUrl } }
                         ]
                     }
@@ -58,18 +56,18 @@ export async function runOcrProvider(input) {
         });
         if (!response.ok) {
             const body = await response.text();
-            throw new Error(`OCR_FAILED: ${response.status} ${body}`);
+            throw new Error(`VISION_FAILED: ${response.status} ${body}`);
         }
         const body = await response.json();
         const content = extractTextFromChatContent(body.choices?.[0]?.message?.content);
         if (!content) {
-            throw new Error('OCR_EMPTY');
+            throw new Error('VISION_EMPTY');
         }
-        return { text: content };
+        return content;
     }
     catch (error) {
         if (error?.name === 'AbortError') {
-            throw new Error('OCR_TIMEOUT');
+            throw new Error('VISION_TIMEOUT');
         }
         throw error;
     }

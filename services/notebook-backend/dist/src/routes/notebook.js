@@ -1,8 +1,10 @@
 import { randomUUID } from 'crypto';
-import { createNotebookItemFile, createNotebookItem as repoCreateNotebookItem, getNotebookChunkStatsByItem, getLatestActiveNotebookItemFile, getNotebookItemFileByOwner, getIndexJobByOwner, getLatestIndexJobByItem, getNotebookItemByOwner, getSyncOpByClientOpId, insertAssistLog, listNotebookItemFilesByItem, listNotebookItemFilesByItemIds, listNotebookChunksByItem, listNotebookItems as repoListNotebookItems, listNotebookItemsAfterCursor, markIndexJobPending, softDeleteNotebookItemFileByOwner, syncNotebookItemPrimaryFileFromLatest, updateNotebookItemByOwner, createSyncOp, updateSyncOpStatus } from '../repos/notebookRepo.js';
+import { createNotebookItemFile, createNotebookItem as repoCreateNotebookItem, getIndexJobByCompany, getNotebookChunkStatsByItem, getNotebookItemAccessible, getNotebookItemByCompany, getLatestActiveNotebookItemFile, getNotebookItemFileByOwner, getIndexJobByOwner, getLatestIndexJobByItem, getNotebookItemByOwner, getSyncOpByClientOpId, listNotebookItemFilesByItem, listNotebookItemFilesByItemIds, listNotebookChunksByItem, listNotebookItems as repoListNotebookItems, listNotebookItemsAfterCursor, markIndexJobPending, softDeleteNotebookItemFileByOwner, syncNotebookItemPrimaryFileFromLatest, updateNotebookItemByOwner, createSyncOp, updateSyncOpStatus } from '../repos/notebookRepo.js';
 import { ensureAssistAllowed, ensureNotebookBasic, resolveNotebookAccessContext, sendNotebookError } from '../services/notebookAuth.js';
-import { enqueueNotebookIndexJob, hybridSearchNotebook } from '../services/notebookIndexing.js';
-import { generateAssistAnswer, getNotebookAiConfig } from '../services/notebookLlm.js';
+import { enqueueNotebookIndexJob } from '../services/notebookIndexing.js';
+import { resolveMatrixContextMessages } from '../services/notebookContextResolver.js';
+import { runNotebookAssist } from '../services/notebookAssistOrchestrator.js';
+import { getNotebookAiConfig, refineContextAssistQuery } from '../services/notebookLlm.js';
 function getBearerToken(req) {
     const authHeader = String(req.headers.authorization || '');
     if (authHeader.startsWith('Bearer ')) {
@@ -30,6 +32,31 @@ function encodeCursor(updatedAt, id) {
 function isUuid(value) {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
+function sendAiRuntimeError(res, message) {
+    if (message === 'CAPABILITY_DISABLED')
+        return sendNotebookError(res, 403, 'CAPABILITY_DISABLED');
+    if (message === 'CAPABILITY_EXPIRED')
+        return sendNotebookError(res, 403, 'CAPABILITY_EXPIRED');
+    if (message === 'QUOTA_EXCEEDED')
+        return sendNotebookError(res, 429, 'QUOTA_EXCEEDED');
+    if (message.startsWith('EMBEDDING_DIM_MISMATCH')) {
+        return sendNotebookError(res, 400, 'EMBEDDING_DIM_MISMATCH', message);
+    }
+    return sendNotebookError(res, 400, 'MODEL_ERROR', message || 'MODEL_ERROR');
+}
+function parseScope(value) {
+    const scope = String(value || '').trim().toLowerCase();
+    if (scope === 'personal' || scope === 'company')
+        return scope;
+    return 'both';
+}
+function ensureCompanyKnowledgeAdmin(context, res) {
+    if (!context.isCompanyAdmin) {
+        sendNotebookError(res, 403, 'FORBIDDEN_ROLE');
+        return false;
+    }
+    return true;
+}
 async function withItemFiles(context, item) {
     if (!item)
         return null;
@@ -40,34 +67,19 @@ async function withItemsFiles(context, items) {
     const byItem = await listNotebookItemFilesByItemIds(context.companyId, context.userId, items.map((item) => item.id));
     return items.map((item) => ({ ...item, files: byItem.get(item.id) || [] }));
 }
-async function getContextMessages(req, roomId, anchorEventId, windowSize = 5) {
-    const token = getMatrixContextToken(req);
-    const hsUrl = getMatrixBaseUrl(req);
-    if (!token || !hsUrl) {
-        throw new Error('INVALID_CONTEXT');
-    }
-    const url = new URL(`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/context/${encodeURIComponent(anchorEventId)}`, hsUrl);
-    url.searchParams.set('limit', String(windowSize));
-    const resp = await fetch(url, {
-        headers: {
-            Authorization: `Bearer ${token}`
-        }
-    });
-    if (!resp.ok) {
-        throw new Error('INVALID_CONTEXT');
-    }
-    const body = await resp.json();
-    const before = (body.events_before || []).slice(-windowSize);
-    const ordered = [...before, ...(body.event ? [body.event] : [])];
-    const messages = ordered
-        .map((m) => ({ event_id: String(m.event_id || ''), body: String(m.content?.body || '').trim() }))
-        .filter((m) => m.event_id && m.body);
-    return messages;
-}
 export async function getMeCapabilities(req, res) {
     const context = await resolveNotebookAccessContext(req);
     if (!context) {
         return sendNotebookError(res, 401, 'UNAUTHORIZED');
+    }
+    if (context.policy.runtime_rejection_code === 'QUOTA_EXCEEDED') {
+        return sendNotebookError(res, 429, 'QUOTA_EXCEEDED');
+    }
+    if (context.policy.runtime_rejection_code === 'CAPABILITY_EXPIRED') {
+        return sendNotebookError(res, 403, 'CAPABILITY_EXPIRED');
+    }
+    if (context.policy.runtime_rejection_code === 'CAPABILITY_DISABLED') {
+        return sendNotebookError(res, 403, 'CAPABILITY_DISABLED');
     }
     return res.json({
         user_id: context.userId,
@@ -86,14 +98,19 @@ export async function listNotebookItems(req, res) {
     const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 100);
     const q = String(req.query.q || '').trim();
     const itemType = String(req.query.item_type || '').trim();
+    const filter = String(req.query.filter || 'all').trim().toLowerCase();
     const status = String(req.query.status || 'active').trim();
+    const scope = parseScope(req.query.scope);
     const cursor = parseCursor(String(req.query.cursor || ''));
+    const isIndexable = filter === 'knowledge' ? true : filter === 'note' ? false : undefined;
     try {
         const rows = await repoListNotebookItems({
             companyId: context.companyId,
             ownerUserId: context.userId,
+            scope,
             status,
             itemType: itemType || undefined,
+            isIndexable,
             query: q || undefined,
             updatedBefore: cursor?.updatedAt || null,
             limit: limit + 1
@@ -126,6 +143,7 @@ export async function createNotebookItem(req, res) {
         const item = await repoCreateNotebookItem({
             companyId: context.companyId,
             ownerUserId: context.userId,
+            sourceScope: 'personal',
             title,
             contentMarkdown,
             itemType,
@@ -144,6 +162,118 @@ export async function createNotebookItem(req, res) {
     catch (error) {
         return sendNotebookError(res, 500, 'INTERNAL_ERROR', error?.message || 'CREATE_FAILED');
     }
+}
+export async function createCompanyNotebookItem(req, res) {
+    const context = await resolveNotebookAccessContext(req);
+    if (!context)
+        return sendNotebookError(res, 401, 'UNAUTHORIZED');
+    if (!ensureNotebookBasic(context, res))
+        return;
+    if (!ensureCompanyKnowledgeAdmin(context, res))
+        return;
+    const body = req.body;
+    const itemType = body.item_type === 'file' ? 'file' : 'text';
+    const title = String(body.title || '').trim() || null;
+    const contentMarkdown = String(body.content_markdown || '').trim() || null;
+    const isIndexable = Boolean(body.is_indexable !== false);
+    try {
+        const item = await repoCreateNotebookItem({
+            companyId: context.companyId,
+            ownerUserId: context.userId,
+            sourceScope: 'company',
+            title,
+            contentMarkdown,
+            itemType,
+            isIndexable
+        });
+        if (isIndexable) {
+            await enqueueNotebookIndexJob({
+                companyId: context.companyId,
+                ownerUserId: context.userId,
+                itemId: String(item.id),
+                jobType: 'upsert'
+            });
+        }
+        return res.status(201).json({ item });
+    }
+    catch (error) {
+        return sendNotebookError(res, 500, 'INTERNAL_ERROR', error?.message || 'CREATE_COMPANY_ITEM_FAILED');
+    }
+}
+export async function updateCompanyNotebookItem(req, res) {
+    const context = await resolveNotebookAccessContext(req);
+    if (!context)
+        return sendNotebookError(res, 401, 'UNAUTHORIZED');
+    if (!ensureNotebookBasic(context, res))
+        return;
+    if (!ensureCompanyKnowledgeAdmin(context, res))
+        return;
+    const id = String(req.params.id || '').trim();
+    if (!id)
+        return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id');
+    const existing = await getNotebookItemByCompany(id, context.companyId);
+    if (!existing || existing.source_scope !== 'company') {
+        return sendNotebookError(res, 404, 'NOT_FOUND');
+    }
+    const body = req.body;
+    if (body.revision !== undefined && Number(body.revision) !== Number(existing.revision)) {
+        return sendNotebookError(res, 409, 'REVISION_CONFLICT');
+    }
+    const updates = {
+        revision: Number(existing.revision) + 1
+    };
+    if (body.title !== undefined)
+        updates.title = String(body.title || '').trim() || null;
+    if (body.content_markdown !== undefined)
+        updates.content_markdown = String(body.content_markdown || '').trim() || null;
+    if (body.status !== undefined)
+        updates.status = body.status === 'deleted' ? 'deleted' : 'active';
+    if (body.is_indexable !== undefined) {
+        updates.is_indexable = Boolean(body.is_indexable);
+        updates.index_status = 'pending';
+        updates.index_error = null;
+    }
+    const item = await updateNotebookItemByOwner(context.companyId, existing.owner_user_id, id, updates);
+    if (!item)
+        return sendNotebookError(res, 404, 'NOT_FOUND');
+    const shouldIndex = Boolean((updates.is_indexable ?? existing.is_indexable) === true);
+    await enqueueNotebookIndexJob({
+        companyId: context.companyId,
+        ownerUserId: existing.owner_user_id,
+        itemId: id,
+        jobType: shouldIndex ? 'upsert' : 'delete'
+    });
+    return res.json({ item });
+}
+export async function deleteCompanyNotebookItem(req, res) {
+    const context = await resolveNotebookAccessContext(req);
+    if (!context)
+        return sendNotebookError(res, 401, 'UNAUTHORIZED');
+    if (!ensureNotebookBasic(context, res))
+        return;
+    if (!ensureCompanyKnowledgeAdmin(context, res))
+        return;
+    const id = String(req.params.id || '').trim();
+    if (!id)
+        return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id');
+    const existing = await getNotebookItemByCompany(id, context.companyId);
+    if (!existing || existing.source_scope !== 'company')
+        return sendNotebookError(res, 404, 'NOT_FOUND');
+    const item = await updateNotebookItemByOwner(context.companyId, existing.owner_user_id, id, {
+        status: 'deleted',
+        revision: Number(existing.revision) + 1,
+        index_status: 'pending',
+        index_error: null
+    });
+    if (!item)
+        return sendNotebookError(res, 404, 'NOT_FOUND');
+    await enqueueNotebookIndexJob({
+        companyId: context.companyId,
+        ownerUserId: existing.owner_user_id,
+        itemId: id,
+        jobType: 'delete'
+    });
+    return res.json({ ok: true, revision: Number(existing.revision) + 1 });
 }
 export async function updateNotebookItem(req, res) {
     const context = await resolveNotebookAccessContext(req);
@@ -172,7 +302,7 @@ export async function updateNotebookItem(req, res) {
         updates.status = body.status === 'deleted' ? 'deleted' : 'active';
     if (body.is_indexable !== undefined) {
         updates.is_indexable = Boolean(body.is_indexable);
-        updates.index_status = body.is_indexable ? 'pending' : 'skipped';
+        updates.index_status = 'pending';
         updates.index_error = null;
     }
     try {
@@ -260,7 +390,7 @@ export async function attachNotebookFile(req, res) {
     const item = await updateNotebookItemByOwner(context.companyId, context.userId, id, {
         item_type: 'file',
         is_indexable: body.is_indexable !== false,
-        index_status: body.is_indexable === false ? 'skipped' : 'pending',
+        index_status: 'pending',
         index_error: null,
         revision: Number(existing.revision) + 1
     });
@@ -320,7 +450,7 @@ export async function deleteNotebookItemFile(req, res) {
         matrix_media_mime: latest?.matrix_media_mime || null,
         matrix_media_size: latest?.matrix_media_size ?? null,
         is_indexable: latest ? latest.is_indexable : false,
-        index_status: latest?.is_indexable ? 'pending' : 'skipped',
+        index_status: 'pending',
         index_error: null,
         revision: Number(item.revision) + 1
     });
@@ -341,7 +471,7 @@ export async function getNotebookIndexStatus(req, res) {
     if (!ensureNotebookBasic(context, res))
         return;
     const id = String(req.params.id || '').trim();
-    const item = await getNotebookItemByOwner(context.companyId, context.userId, id);
+    const item = await getNotebookItemAccessible(context.companyId, context.userId, id);
     if (!item)
         return sendNotebookError(res, 404, 'NOT_FOUND');
     return res.json({ item_id: item.id, index_status: item.index_status, index_error: item.index_error || null });
@@ -355,20 +485,20 @@ export async function getNotebookItemParsedPreview(req, res) {
     const id = String(req.params.id || '').trim();
     if (!id)
         return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id');
-    const item = await getNotebookItemByOwner(context.companyId, context.userId, id);
+    const item = await getNotebookItemAccessible(context.companyId, context.userId, id);
     if (!item)
         return sendNotebookError(res, 404, 'NOT_FOUND');
     const limit = Math.min(Math.max(Number(req.query.limit || 8), 1), 50);
     const chars = Math.min(Math.max(Number(req.query.chars || 6000), 500), 40000);
     const chunks = await listNotebookChunksByItem({
         companyId: context.companyId,
-        ownerUserId: context.userId,
+        ownerUserId: item.owner_user_id,
         itemId: id,
         limit
     });
     const stats = await getNotebookChunkStatsByItem({
         companyId: context.companyId,
-        ownerUserId: context.userId,
+        ownerUserId: item.owner_user_id,
         itemId: id
     });
     const parsedText = chunks
@@ -399,19 +529,19 @@ export async function getNotebookItemChunks(req, res) {
     const id = String(req.params.id || '').trim();
     if (!id)
         return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id');
-    const item = await getNotebookItemByOwner(context.companyId, context.userId, id);
+    const item = await getNotebookItemAccessible(context.companyId, context.userId, id);
     if (!item)
         return sendNotebookError(res, 404, 'NOT_FOUND');
     const limit = Math.min(Math.max(Number(req.query.limit || 120), 1), 400);
     const chunks = await listNotebookChunksByItem({
         companyId: context.companyId,
-        ownerUserId: context.userId,
+        ownerUserId: item.owner_user_id,
         itemId: id,
         limit
     });
     const stats = await getNotebookChunkStatsByItem({
         companyId: context.companyId,
-        ownerUserId: context.userId,
+        ownerUserId: item.owner_user_id,
         itemId: id
     });
     return res.json({
@@ -429,11 +559,51 @@ export async function retryNotebookIndexJob(req, res) {
     if (!ensureNotebookBasic(context, res))
         return;
     const jobId = String(req.params.id || '').trim();
-    const job = await getIndexJobByOwner(jobId, context.companyId, context.userId);
+    let job = await getIndexJobByOwner(jobId, context.companyId, context.userId);
+    if (!job && context.isCompanyAdmin) {
+        const companyJob = await getIndexJobByCompany(jobId, context.companyId);
+        if (companyJob) {
+            const item = await getNotebookItemByCompany(companyJob.item_id, context.companyId);
+            if (item?.source_scope === 'company') {
+                job = companyJob;
+            }
+        }
+    }
     if (!job)
         return sendNotebookError(res, 404, 'JOB_NOT_FOUND');
     await markIndexJobPending(jobId);
     return res.status(202).json({ job_id: jobId, status: 'pending' });
+}
+export async function reindexNotebookItem(req, res) {
+    const context = await resolveNotebookAccessContext(req);
+    if (!context)
+        return sendNotebookError(res, 401, 'UNAUTHORIZED');
+    if (!ensureNotebookBasic(context, res))
+        return;
+    const itemId = String(req.params.id || '').trim();
+    if (!itemId)
+        return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing id');
+    let item = await getNotebookItemByOwner(context.companyId, context.userId, itemId);
+    if (!item && context.isCompanyAdmin) {
+        const companyItem = await getNotebookItemByCompany(itemId, context.companyId);
+        if (companyItem?.source_scope === 'company') {
+            item = companyItem;
+        }
+    }
+    if (!item)
+        return sendNotebookError(res, 404, 'NOT_FOUND');
+    await updateNotebookItemByOwner(context.companyId, item.owner_user_id, itemId, {
+        index_status: 'pending',
+        index_error: null
+    });
+    await enqueueNotebookIndexJob({
+        companyId: context.companyId,
+        ownerUserId: item.owner_user_id,
+        itemId,
+        jobType: item.is_indexable ? 'upsert' : 'delete'
+    });
+    const indexJob = await getLatestIndexJobByItem(context.companyId, itemId);
+    return res.status(202).json({ item_id: itemId, status: 'pending', index_job: indexJob || null });
 }
 export async function assistQuery(req, res) {
     const start = Date.now();
@@ -446,49 +616,27 @@ export async function assistQuery(req, res) {
     const queryText = String(body.query || '').trim();
     const roomId = String(body.room_id || '').trim() || null;
     const responseLang = String(body.response_lang || '').trim() || 'zh-TW';
+    const scope = parseScope(body.scope);
     if (!queryText)
         return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing query');
     const topK = Math.max(1, Math.min(Number(body.top_k || context.policy.retrieval_top_k || 5), 20));
     try {
-        const sources = await hybridSearchNotebook({
-            companyId: context.companyId,
-            ownerUserId: context.userId,
-            query: queryText,
-            topK
-        });
-        const aiConfig = await getNotebookAiConfig(context.companyId);
-        const blocks = sources.map((s) => ({
-            source: `${s.title || s.item_id}${s.source_locator ? ` (${s.source_locator})` : ''}`,
-            text: s.snippet
-        }));
-        const { answer, confidence } = await generateAssistAnswer(aiConfig, queryText, blocks, responseLang);
         const traceId = randomUUID();
-        await insertAssistLog({
+        const result = await runNotebookAssist({
             companyId: context.companyId,
             userId: context.userId,
             roomId,
-            triggerType: 'manual_query',
             queryText,
-            contextMessageIds: null,
-            usedSources: sources,
-            responseText: answer,
-            responseConfidence: confidence,
-            adoptedAction: 'none',
-            latencyMs: Date.now() - start
+            topK,
+            scope,
+            responseLang,
+            triggerType: 'manual_query',
+            startAtMs: start
         });
-        return res.json({
-            answer,
-            sources,
-            citations: sources.map((s, idx) => ({ source_id: `${s.item_id}:${idx + 1}`, locator: s.source_locator })),
-            confidence,
-            trace_id: traceId,
-            guardrail: {
-                insufficient_evidence: answer.includes('知識庫未找到明確依據')
-            }
-        });
+        return res.json({ ...result, trace_id: traceId });
     }
     catch (error) {
-        return sendNotebookError(res, 502, 'MODEL_ERROR', error?.message || 'MODEL_ERROR');
+        return sendAiRuntimeError(res, String(error?.message || 'MODEL_ERROR'));
     }
 }
 export async function assistFromContext(req, res) {
@@ -503,56 +651,59 @@ export async function assistFromContext(req, res) {
     const anchorEventId = String(body.anchor_event_id || '').trim();
     const windowSize = Math.min(Math.max(Number(body.window_size || 5), 1), 20);
     const responseLang = String(body.response_lang || '').trim() || 'zh-TW';
+    const scope = parseScope(body.scope);
     if (!roomId || !anchorEventId) {
         return sendNotebookError(res, 422, 'INVALID_CONTEXT');
     }
     try {
-        const contextMessages = await getContextMessages(req, roomId, anchorEventId, windowSize);
-        if (contextMessages.length === 0) {
-            return sendNotebookError(res, 422, 'INVALID_CONTEXT');
-        }
-        const queryText = contextMessages.map((m) => m.body).join('\n');
-        const sources = await hybridSearchNotebook({
-            companyId: context.companyId,
-            ownerUserId: context.userId,
-            query: queryText,
-            topK: context.policy.retrieval_top_k || 5
+        const contextMessages = await resolveMatrixContextMessages({
+            hsUrl: getMatrixBaseUrl(req),
+            accessToken: getMatrixContextToken(req),
+            roomId,
+            anchorEventId,
+            windowSize
         });
-        const aiConfig = await getNotebookAiConfig(context.companyId);
-        const blocks = sources.map((s) => ({
-            source: `${s.title || s.item_id}${s.source_locator ? ` (${s.source_locator})` : ''}`,
-            text: s.snippet
-        }));
-        const { answer, confidence } = await generateAssistAnswer(aiConfig, queryText, blocks, responseLang);
+        const anchorMessage = contextMessages[contextMessages.length - 1]?.body || '';
+        const contextBefore = contextMessages.slice(0, -1).map((m) => m.body);
+        const fallbackQuery = [anchorMessage, ...contextBefore].filter(Boolean).join('\n');
+        let queryText = fallbackQuery;
+        try {
+            const aiConfig = await getNotebookAiConfig(context.companyId);
+            queryText = await refineContextAssistQuery(aiConfig, {
+                anchorText: anchorMessage,
+                contextTexts: contextBefore,
+                responseLanguage: responseLang
+            });
+        }
+        catch {
+            queryText = fallbackQuery;
+        }
         const traceId = randomUUID();
-        await insertAssistLog({
+        const result = await runNotebookAssist({
             companyId: context.companyId,
             userId: context.userId,
             roomId,
+            queryText,
+            topK: context.policy.retrieval_top_k || 5,
+            scope,
+            responseLang,
             triggerType: 'from_message_context',
             triggerEventId: anchorEventId,
-            queryText,
             contextMessageIds: contextMessages.map((m) => m.event_id),
-            usedSources: sources,
-            responseText: answer,
-            responseConfidence: confidence,
-            adoptedAction: 'none',
-            latencyMs: Date.now() - start
+            startAtMs: start
         });
         return res.json({
-            answer,
-            sources,
-            citations: sources.map((s, idx) => ({ source_id: `${s.item_id}:${idx + 1}`, locator: s.source_locator })),
-            confidence,
+            ...result,
             trace_id: traceId,
-            context_message_ids: contextMessages.map((m) => m.event_id),
-            guardrail: {
-                insufficient_evidence: answer.includes('知識庫未找到明確依據')
-            }
+            context_message_ids: contextMessages.map((m) => m.event_id)
         });
     }
-    catch (_error) {
-        return sendNotebookError(res, 422, 'INVALID_CONTEXT');
+    catch (error) {
+        const message = String(error?.message || '');
+        if (message === 'INVALID_CONTEXT') {
+            return sendNotebookError(res, 422, 'INVALID_CONTEXT');
+        }
+        return sendAiRuntimeError(res, message || 'MODEL_ERROR');
     }
 }
 export async function syncPush(req, res) {
