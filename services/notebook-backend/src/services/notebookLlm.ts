@@ -232,28 +232,31 @@ export async function generateAssistAnswer(
   query: string,
   contextBlocks: Array<{ source: string; text: string }>,
   responseLanguage?: string | null
-): Promise<{ answer: string; confidence: number }> {
+): Promise<{ answer: string; summary: string; referenceAnswer: string }> {
   if (!config.chatBaseUrl || !config.chatApiKey) {
     throw new Error('CAPABILITY_DISABLED')
   }
 
-  const contextText = contextBlocks.map((c, idx) => `[S${idx + 1}] ${c.source}\n${c.text}`).join('\n\n')
+  const contextText = contextBlocks.map((c) => `${c.source} ${String(c.text || '').replace(/\s+/g, ' ').trim()}`).join('\n')
   const languageInstruction = buildLanguageInstruction(responseLanguage || 'zh-TW')
 
   const systemPrompt = [
-    '你是 GoTradeTalk Notebook 助理。',
-    '你只能依據提供的來源內容回答，不得捏造功能、規格、價格或承諾。',
-    '若證據不足，必須回答「知識庫未找到明確依據」。',
-    '每段關鍵結論都要標註來源編號，例如 [S1]。',
-    '禁止使用未提供來源的資訊。'
+    '你是「知識庫回答生成器」。',
+    '你只能依據提供的召回內容回答，不得使用外部常識補全。',
+    '你必須輸出兩行，且只能兩行：',
+    '總結歸納：{內容}',
+    '參考答案：{內容}',
+    '「參考答案」要可直接回覆、語氣自然且可執行。',
+    '若證據不足，兩行都要明確寫「知識庫未找到明確依據」。',
+    '禁止輸出 CONFIDENCE、禁止輸出額外段落、禁止空白行。'
   ].join('\n')
 
   const userPrompt = [
-    `使用者問題：${query}`,
-    '以下是可用來源：',
+    `檢索關鍵詞：${query}`,
+    '召回內容（最多3條）：',
     contextText || '(無來源)',
     languageInstruction
-  ].join('\n\n')
+  ].join('\n')
 
   let resp: Response
   try {
@@ -281,11 +284,15 @@ export async function generateAssistAnswer(
   const body = await resp.json() as { choices?: Array<{ message?: { content?: string } }> }
   const content = String(body.choices?.[0]?.message?.content || '').trim()
 
-  const match = content.match(/CONFIDENCE\s*:\s*(0(?:\.\d+)?|1(?:\.0+)?)/i)
-  const confidence = match ? Number(match[1]) : 0.5
-  const answer = content.replace(/\n?CONFIDENCE\s*:\s*(0(?:\.\d+)?|1(?:\.0+)?)/gi, '').trim() || '知識庫未找到明確依據'
+  const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  const summaryMatch = content.match(/總結歸納\s*[:：]\s*([\s\S]*?)(?:\n\s*參考答案\s*[:：]|$)/i)
+  const referenceMatch = content.match(/參考答案\s*[:：]\s*([\s\S]*?)$/i)
+  const fallbackLine = lines.find(Boolean) || '知識庫未找到明確依據'
+  const summary = String(summaryMatch?.[1] || fallbackLine).replace(/\s+/g, ' ').trim() || '知識庫未找到明確依據'
+  const referenceAnswer = String(referenceMatch?.[1] || summary).replace(/\s+/g, ' ').trim() || '知識庫未找到明確依據'
+  const answer = `總結歸納：${summary}\n參考答案：${referenceAnswer}`
 
-  return { answer, confidence }
+  return { answer, summary, referenceAnswer }
 }
 
 export async function refineContextAssistQuery(
@@ -305,19 +312,24 @@ export async function refineContextAssistQuery(
 
   const languageInstruction = buildLanguageInstruction(params.responseLanguage || 'zh-TW')
   const systemPrompt = [
-    '你是檢索查詢重寫器。',
-    '任務：以「當前錨點句」作為主語意，將上文對話做為輔助，輸出最適合向知識庫檢索的查詢語句。',
-    '必須保留主問題核心，不得改變使用者意圖。',
-    '輸出只允許一行純文字，不要加前綴、編號、引號或解釋。',
-    '可補上關鍵名詞、約束條件、同義詞，但避免冗長。'
+    '你是「知識庫檢索關鍵詞重寫器」。',
+    '任務：根據輸入的多段對話，輸出 1 句可直接檢索的關鍵詞。',
+    '第1段是主問題，權重最高，不能改變其核心意圖。',
+    '其餘段落僅作背景；若與第1段無關或衝突，請忽略。',
+    '輸出只允許一行純文字，不要前綴、編號、引號、解釋。'
   ].join('\n')
 
+  const paddedContext = [...contextTexts, '', '', ''].slice(0, 4)
   const userPrompt = [
-    `錨點句（主語意）：${anchorText || '(空)'}`,
-    '上文輔助句：',
-    contextTexts.length > 0 ? contextTexts.map((line, idx) => `${idx + 1}. ${line}`).join('\n') : '(無)',
+    `主問題（第1段，最高優先）：${anchorText || '(空)'}`,
+    '背景（第2-5段，僅輔助）：',
+    `第2段：${paddedContext[0] || '(無)'}`,
+    `第3段：${paddedContext[1] || '(無)'}`,
+    `第4段：${paddedContext[2] || '(無)'}`,
+    `第5段：${paddedContext[3] || '(無)'}`,
+    '請輸出：一行「檢索關鍵詞」。',
     languageInstruction
-  ].join('\n\n')
+  ].join('\n')
 
   try {
     const resp = await fetch(`${config.chatBaseUrl}/v1/chat/completions`, {
