@@ -179,35 +179,55 @@ export async function requireHubUser(req: Request, res: Response, next: NextFunc
     })
   }
 
-  if (!isSupabaseAuthConfigured || !supabaseAdmin) {
-    return authNotConfigured(res)
+  let resolvedUserId = ''
+  let resolvedEmail: string | undefined
+  let profile = null as Awaited<ReturnType<typeof getProfileById>> | null
+
+  // First try Supabase JWT validation when env is configured.
+  if (isSupabaseAuthConfigured && supabaseAdmin) {
+    const { data, error } = await supabaseAdmin.auth.getUser(token)
+    if (!error && data.user) {
+      resolvedUserId = data.user.id
+      resolvedEmail = data.user.email ?? undefined
+      profile = await getProfileByAuthUserIdOrId(data.user.id)
+      if (profile && !String(profile.company_id || '').trim()) {
+        profile = null
+      }
+    }
   }
 
-  const { data, error } = await supabaseAdmin.auth.getUser(token)
-  if (error || !data.user) {
+  // Fallback path for Hub-issued JWT: resolve identity through Hub /me and sync local mapping.
+  if (!profile) {
+    const syncedUserId = await syncProfileFromHub(req, token).catch(() => null)
+    if (syncedUserId) {
+      profile = await getProfileById(syncedUserId)
+      resolvedUserId = profile?.id || syncedUserId
+    }
+  }
+
+  if (!resolvedUserId) {
     return res.status(401).json({
       code: 'INVALID_AUTH_TOKEN',
       message: 'Invalid auth token'
     })
   }
 
-  let profile = await getProfileByAuthUserIdOrId(data.user.id)
-  if (profile && !String(profile.company_id || '').trim()) {
-    profile = null
-  }
   if (!profile) {
-    const syncedUserId = await syncProfileFromHub(req, token).catch(() => null)
-    if (syncedUserId) {
-      profile = await getProfileById(syncedUserId)
-    }
+    profile = await getProfileById(resolvedUserId)
   }
 
-  const resolvedUserId = profile?.id || data.user.id
+  if (!profile) {
+    return res.status(401).json({
+      code: 'UNAUTHORIZED',
+      message: 'Profile not found'
+    })
+  }
+
   const memberships = await listMembershipsByUserId(resolvedUserId)
 
   const requestUser: RequestUser = {
     id: resolvedUserId,
-    email: data.user.email ?? undefined,
+    email: resolvedEmail,
     userType: profile?.user_type,
     isEmployee: memberships.length > 0 || profile?.user_type === 'staff',
     memberships
