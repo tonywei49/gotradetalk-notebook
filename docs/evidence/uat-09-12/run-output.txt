@@ -1,0 +1,9 @@
+UAT real sync run at: 2026-02-27T08:06:52.492Z
+scopeKey: uat:@tonywei49:matrix.gotradetalk.com:sync-v1
+UAT-09 queued ops before sync: 1
+UAT-10 first retry state: failed_retryable attempt=1
+UAT-10 idempotency second status: duplicate
+UAT-11 conflicts found: 1
+UAT-12 pending before restart: 0
+UAT-12 pending after restart: 0
+UAT-12 pull cursor after restart: 2026-02-27 08:06:47.186988+00

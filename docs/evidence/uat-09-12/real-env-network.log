@@ -1,0 +1,42 @@
+[GET] https://matrix.gotradetalk.com/_matrix/client/v3/sync?filter=FbQa&timeout=30000&org.matrix.msc4222.use_state_after=true&since=1658822 => [200] 
+[POST] https://api.gotradetalk.com/translate?matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [FAILED] net::ERR_ABORTED
+[POST] https://matrix.gotradetalk.com/_matrix/client/v3/rooms/!aqWY4QUM6L6LcBt04a%3Amatrix.gotradetalk.com/receipt/m.read/%24V5O8gZXEYt9wP1fIPg4YZ5d8LEq3xmVEQzs1ERBKyB4 => [200] 
+[GET] https://matrix.gotradetalk.com/_matrix/client/v3/sync?filter=FbQa&timeout=30000&org.matrix.msc4222.use_state_after=true&since=1658824 => [200] 
+[GET] https://matrix.gotradetalk.com/_matrix/client/v3/sync?filter=FbQa&timeout=30000&org.matrix.msc4222.use_state_after=true&since=1658828 => [FAILED] net::ERR_ABORTED
+[POST] https://chat.gotradetalk.com/cdn-cgi/rum? => [FAILED] net::ERR_ABORTED
+[POST] https://chat.gotradetalk.com/cdn-cgi/rum? => [FAILED] net::ERR_ABORTED
+[POST] https://chat.gotradetalk.com/cdn-cgi/rum? => [FAILED] net::ERR_ABORTED
+[GET] https://matrix.gotradetalk.com/_matrix/client/v3/sync?filter=FbQa&timeout=30000&org.matrix.msc4222.use_state_after=true&since=1658828 => [FAILED] net::ERR_ABORTED
+[POST] https://chat.gotradetalk.com/cdn-cgi/rum? => [FAILED] net::ERR_ABORTED
+[POST] https://api.gotradetalk.com/translate?matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [FAILED] net::ERR_ABORTED
+[POST] https://chat.gotradetalk.com/cdn-cgi/rum? => [204] 
+[GET] https://api.gotradetalk.com/contacts => [200] 
+[GET] https://api.gotradetalk.com/contacts/requests => [200] 
+[GET] https://api.gotradetalk.com/contacts/requests/outgoing => [200] 
+[GET] https://api.gotradetalk.com/contacts => [200] 
+[GET] https://api.gotradetalk.com/me?hs_url=https%3A%2F%2Fmatrix.gotradetalk.com&matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [200] 
+[GET] https://matrix.gotradetalk.com/_matrix/client/v3/voip/turnServer => [404] 
+[GET] https://matrix.gotradetalk.com/_matrix/client/versions => [200] 
+[GET] https://matrix.gotradetalk.com/_matrix/client/v3/pushrules/ => [200] 
+[GET] https://matrix.gotradetalk.com/_matrix/client/v3/capabilities => [200] 
+[GET] https://matrix.gotradetalk.com/_matrix/client/v3/user/%40tonywei49%3Amatrix.gotradetalk.com/filter/FbQa => [200] 
+[GET] https://matrix.gotradetalk.com/_matrix/client/v3/sync?filter=%7B%22room%22%3A%7B%22timeline%22%3A%7B%22unread_thread_notifications%22%3Atrue%2C%22limit%22%3A20%7D%7D%7D&timeout=0&org.matrix.msc4222.use_state_after=true&_cacheBuster=1772179662625 => [200] 
+[GET] https://notebook-api.gotradetalk.com/me/capabilities?hs_url=https%3A%2F%2Fmatrix.gotradetalk.com&matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [200] 
+[PUT] https://matrix.gotradetalk.com/_matrix/client/v3/user/%40tonywei49%3Amatrix.gotradetalk.com/account_data/m.direct => [200] 
+[PUT] https://matrix.gotradetalk.com/_matrix/client/v3/user/%40tonywei49%3Amatrix.gotradetalk.com/account_data/m.direct => [200] 
+[PUT] https://matrix.gotradetalk.com/_matrix/client/v3/user/%40tonywei49%3Amatrix.gotradetalk.com/account_data/m.direct => [200] 
+[PUT] https://matrix.gotradetalk.com/_matrix/client/v3/user/%40tonywei49%3Amatrix.gotradetalk.com/account_data/m.direct => [200] 
+[GET] https://matrix.gotradetalk.com/_matrix/client/v3/sync?filter=FbQa&timeout=30000&org.matrix.msc4222.use_state_after=true&since=1658836 => [200] 
+[POST] https://api.gotradetalk.com/translate?matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [403] 
+[POST] https://api.gotradetalk.com/translate?matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [403] 
+[POST] https://api.gotradetalk.com/translate?matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [403] 
+[POST] https://api.gotradetalk.com/translate?matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [403] 
+[POST] https://api.gotradetalk.com/translate?matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [403] 
+[POST] https://api.gotradetalk.com/translate?matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [403] 
+[POST] https://api.gotradetalk.com/translate?matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [403] 
+[POST] https://api.gotradetalk.com/translate?matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [403] 
+[POST] https://api.gotradetalk.com/translate?matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [403] 
+[POST] https://api.gotradetalk.com/translate?matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [403] 
+[POST] https://api.gotradetalk.com/translate?matrix_user_id=%40tonywei49%3Amatrix.gotradetalk.com => [403] 
+[POST] https://matrix.gotradetalk.com/_matrix/client/v3/rooms/!aqWY4QUM6L6LcBt04a%3Amatrix.gotradetalk.com/receipt/m.read/%24V5O8gZXEYt9wP1fIPg4YZ5d8LEq3xmVEQzs1ERBKyB4 => [200] 
+[GET] https://matrix.gotradetalk.com/_matrix/client/v3/sync?filter=FbQa&timeout=30000&org.matrix.msc4222.use_state_after=true&since=1658842

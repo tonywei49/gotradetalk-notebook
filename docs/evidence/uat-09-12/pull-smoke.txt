@@ -1,0 +1,24 @@
+--- headers ---
+HTTP/2 404 
+access-control-allow-credentials: true
+alt-svc: h3=":443"; ma=2592000
+content-security-policy: default-src 'none'
+content-type: text/html; charset=utf-8
+date: Fri, 27 Feb 2026 07:58:59 GMT
+vary: Origin
+x-content-type-options: nosniff
+x-powered-by: Express
+content-length: 157
+
+
+--- body ---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Error</title>
+</head>
+<body>
+<pre>Cannot GET /notebook/sync/pull</pre>
+</body>
+</html>

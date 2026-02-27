@@ -287,6 +287,8 @@
   - `docs/app-offline-sync-spec.md`（第 2、3、4、7 節，v1）
   - `gotradetalk-client/visitor/src/notebook/store.ts`
 - 對應 UAT: `UAT-09`, `UAT-10`
+- 真實環境備註（2026-02-27）:
+  - 已完成資料層實測，證據見 `docs/uat-09-12-offline-sync-report.md` 與 `docs/evidence/uat-09-12/`
 
 ### APP-02 離線讀寫
 - [x] 進度: 已完成（實作 + E2E）
@@ -298,6 +300,8 @@
   - `gotradetalk-client/visitor/src/notebook/service.ts`
   - `gotradetalk-client/visitor/src/views/CustomerHome.vue`
 - 對應 UAT: `UAT-09`, `UAT-10`
+- 真實環境備註（2026-02-27）:
+  - 已完成離線寫入與恢復同步實測（PASS）
 
 ### APP-03 自動同步引擎
 - [x] 進度: 已完成（push/pull v1 + checkpoint + 退避 + E2E）
@@ -309,9 +313,11 @@
   - `gotradetalk-client/visitor/src/notebook/syncEngine.ts`
   - `gotradetalk-client/visitor/src/services/hubApi.ts`
 - 對應 UAT: `UAT-09`, `UAT-10`, `UAT-11`
+- 真實環境備註（2026-02-27）:
+  - push/pull、幂等、retry/backoff/jitter、checkpoint 均實測 PASS
 
 ### APP-04 衝突 UI
-- [x] 進度: 已完成（LWW + conflict 副本 + E2E）
+- [ ] 進度: 真實環境待收口（本地/E2E 已完成）
 - 內容:
   - 顯示衝突
   - 選擇本地版/雲端版
@@ -323,6 +329,9 @@
   - `cd /Users/mac/Documents/github/gotradetalk-client/visitor && npm run test:e2e:notebook-sync`（PASS）
   - `docs/uat-09-12-offline-sync-report.md`
 - 對應 UAT: `UAT-12`
+- 真實環境阻塞（2026-02-27）:
+  - 現網 Matrix `/app` 路徑未暴露 2.4 衝突 UI 入口，無法完成 UI 級衝突處置取證
+  - Notebook API `push update/create-existing` 出現 `INTERNAL_ERROR`，影響「保留本地版」回寫鏈路
 
 ## 3. 建議分 Sprint
 

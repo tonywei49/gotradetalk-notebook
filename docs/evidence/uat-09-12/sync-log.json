@@ -1,0 +1,487 @@
+[
+  {
+    "ts": "2026-02-27T08:06:37.383Z",
+    "phase": "push",
+    "forced_error_status": 503,
+    "payload": {
+      "device_id": "device:1772179597379",
+      "ops": [
+        {
+          "client_op_id": "op-700e2874-cb9d-4962-ba2c-5543dd1aaa99",
+          "entity_type": "item",
+          "entity_id": "714437b5-6dcb-49e8-9c4d-ba96e2491592",
+          "op_type": "create",
+          "base_revision": 0,
+          "op_payload": {
+            "source_scope": "personal",
+            "title": "UAT-09 offline title",
+            "content_markdown": "UAT-09 offline content",
+            "item_type": "text",
+            "is_indexable": true,
+            "index_status": "pending",
+            "status": "active"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "ts": "2026-02-27T08:06:42.222Z",
+    "phase": "push",
+    "status": 200,
+    "payload": {
+      "device_id": "device:1772179597379",
+      "ops": [
+        {
+          "client_op_id": "op-700e2874-cb9d-4962-ba2c-5543dd1aaa99",
+          "entity_type": "item",
+          "entity_id": "714437b5-6dcb-49e8-9c4d-ba96e2491592",
+          "op_type": "create",
+          "base_revision": 0,
+          "op_payload": {
+            "source_scope": "personal",
+            "title": "UAT-09 offline title",
+            "content_markdown": "UAT-09 offline content",
+            "item_type": "text",
+            "is_indexable": true,
+            "index_status": "pending",
+            "status": "active"
+          }
+        }
+      ]
+    },
+    "body": {
+      "results": [
+        {
+          "client_op_id": "op-700e2874-cb9d-4962-ba2c-5543dd1aaa99",
+          "status": "applied",
+          "server_revision": 1,
+          "conflict_copy_id": null
+        }
+      ],
+      "server_cursor": "2026-02-27T08:06:42.120Z"
+    }
+  },
+  {
+    "ts": "2026-02-27T08:06:43.272Z",
+    "phase": "pull",
+    "status": 200,
+    "params": {
+      "limit": 200
+    },
+    "body": {
+      "changes": [
+        {
+          "id": "0ba60a60-9cd8-443b-bee2-1ef21acb1060",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "12121212",
+          "content_markdown": "1212121212",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": false,
+          "index_status": "skipped",
+          "index_error": null,
+          "status": "active",
+          "revision": 2,
+          "created_at": "2026-02-21 07:38:51.74526+00",
+          "updated_at": "2026-02-21 07:38:58.363483+00"
+        },
+        {
+          "id": "5aabb117-9026-48ab-810f-3a74c4bd6a52",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "橘子",
+          "content_markdown": "橘子是水果，紫色皮",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": true,
+          "index_status": "success",
+          "index_error": null,
+          "status": "active",
+          "revision": 4,
+          "created_at": "2026-02-25 04:16:03.43441+00",
+          "updated_at": "2026-02-25 05:08:30.745428+00"
+        },
+        {
+          "id": "eda4bb3b-9dad-4aeb-860e-420d986f9261",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "UAT-09 offline title",
+          "content_markdown": "UAT-09 offline content",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": true,
+          "index_status": "pending",
+          "index_error": null,
+          "status": "active",
+          "revision": 1,
+          "created_at": "2026-02-27 08:03:45.622741+00",
+          "updated_at": "2026-02-27 08:03:45.622741+00"
+        },
+        {
+          "id": "58b138a1-6aa9-49e2-a4ed-6206c57e7e1c",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "t1",
+          "content_markdown": "c1",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": true,
+          "index_status": "pending",
+          "index_error": null,
+          "status": "active",
+          "revision": 1,
+          "created_at": "2026-02-27 08:04:35.724392+00",
+          "updated_at": "2026-02-27 08:04:35.724392+00"
+        },
+        {
+          "id": "2fa436fb-7a31-423c-908b-530556e7b5f5",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "t1",
+          "content_markdown": "c1",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": true,
+          "index_status": "pending",
+          "index_error": null,
+          "status": "deleted",
+          "revision": 2,
+          "created_at": "2026-02-27 08:05:11.781858+00",
+          "updated_at": "2026-02-27 08:05:16.075695+00"
+        },
+        {
+          "id": "54581139-7103-4e55-b008-95792184b762",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "t1",
+          "content_markdown": "c1",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": true,
+          "index_status": "pending",
+          "index_error": null,
+          "status": "deleted",
+          "revision": 2,
+          "created_at": "2026-02-27 08:05:40.128859+00",
+          "updated_at": "2026-02-27 08:05:42.460073+00"
+        },
+        {
+          "id": "714437b5-6dcb-49e8-9c4d-ba96e2491592",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "UAT-09 offline title",
+          "content_markdown": "UAT-09 offline content",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": true,
+          "index_status": "pending",
+          "index_error": null,
+          "status": "active",
+          "revision": 1,
+          "created_at": "2026-02-27 08:06:42.11697+00",
+          "updated_at": "2026-02-27 08:06:42.11697+00"
+        }
+      ],
+      "next_cursor": "2026-02-27 08:06:42.11697+00",
+      "has_more": false
+    }
+  },
+  {
+    "ts": "2026-02-27T08:06:44.433Z",
+    "phase": "pull",
+    "status": 200,
+    "params": {
+      "limit": 200
+    },
+    "body": {
+      "changes": [
+        {
+          "id": "0ba60a60-9cd8-443b-bee2-1ef21acb1060",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "12121212",
+          "content_markdown": "1212121212",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": false,
+          "index_status": "skipped",
+          "index_error": null,
+          "status": "active",
+          "revision": 2,
+          "created_at": "2026-02-21 07:38:51.74526+00",
+          "updated_at": "2026-02-21 07:38:58.363483+00"
+        },
+        {
+          "id": "5aabb117-9026-48ab-810f-3a74c4bd6a52",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "橘子",
+          "content_markdown": "橘子是水果，紫色皮",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": true,
+          "index_status": "success",
+          "index_error": null,
+          "status": "active",
+          "revision": 4,
+          "created_at": "2026-02-25 04:16:03.43441+00",
+          "updated_at": "2026-02-25 05:08:30.745428+00"
+        },
+        {
+          "id": "eda4bb3b-9dad-4aeb-860e-420d986f9261",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "UAT-09 offline title",
+          "content_markdown": "UAT-09 offline content",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": true,
+          "index_status": "pending",
+          "index_error": null,
+          "status": "active",
+          "revision": 1,
+          "created_at": "2026-02-27 08:03:45.622741+00",
+          "updated_at": "2026-02-27 08:03:45.622741+00"
+        },
+        {
+          "id": "58b138a1-6aa9-49e2-a4ed-6206c57e7e1c",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "t1",
+          "content_markdown": "c1",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": true,
+          "index_status": "pending",
+          "index_error": null,
+          "status": "active",
+          "revision": 1,
+          "created_at": "2026-02-27 08:04:35.724392+00",
+          "updated_at": "2026-02-27 08:04:35.724392+00"
+        },
+        {
+          "id": "2fa436fb-7a31-423c-908b-530556e7b5f5",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "t1",
+          "content_markdown": "c1",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": true,
+          "index_status": "pending",
+          "index_error": null,
+          "status": "deleted",
+          "revision": 2,
+          "created_at": "2026-02-27 08:05:11.781858+00",
+          "updated_at": "2026-02-27 08:05:16.075695+00"
+        },
+        {
+          "id": "54581139-7103-4e55-b008-95792184b762",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "t1",
+          "content_markdown": "c1",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": true,
+          "index_status": "pending",
+          "index_error": null,
+          "status": "deleted",
+          "revision": 2,
+          "created_at": "2026-02-27 08:05:40.128859+00",
+          "updated_at": "2026-02-27 08:05:42.460073+00"
+        },
+        {
+          "id": "714437b5-6dcb-49e8-9c4d-ba96e2491592",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "UAT-09 offline title",
+          "content_markdown": "UAT-09 offline content",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": true,
+          "index_status": "pending",
+          "index_error": null,
+          "status": "active",
+          "revision": 1,
+          "created_at": "2026-02-27 08:06:42.11697+00",
+          "updated_at": "2026-02-27 08:06:42.11697+00"
+        },
+        {
+          "id": "bcddb4e1-41a1-43be-a7f9-bea05919963b",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "UAT-10 idempotent create",
+          "content_markdown": "same create op twice",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": true,
+          "index_status": "pending",
+          "index_error": null,
+          "status": "active",
+          "revision": 1,
+          "created_at": "2026-02-27 08:06:44.208253+00",
+          "updated_at": "2026-02-27 08:06:44.208253+00"
+        }
+      ],
+      "next_cursor": "2026-02-27 08:06:44.208253+00",
+      "has_more": false
+    }
+  },
+  {
+    "ts": "2026-02-27T08:06:48.323Z",
+    "phase": "push",
+    "status": 200,
+    "payload": {
+      "device_id": "device:1772179597379",
+      "ops": [
+        {
+          "client_op_id": "op-conflict-db9bf603-8ae9-4099-88e3-7c4e362e839e",
+          "entity_type": "item",
+          "entity_id": "714437b5-6dcb-49e8-9c4d-ba96e2491592",
+          "op_type": "delete",
+          "base_revision": 1,
+          "op_payload": {
+            "status": "deleted"
+          }
+        }
+      ]
+    },
+    "body": {
+      "results": [
+        {
+          "client_op_id": "op-conflict-db9bf603-8ae9-4099-88e3-7c4e362e839e",
+          "status": "conflict",
+          "server_revision": 2,
+          "conflict_copy_id": "97586519-5423-4a9c-b963-a8359e2a726a"
+        }
+      ],
+      "server_cursor": "2026-02-27T08:06:48.232Z"
+    }
+  },
+  {
+    "ts": "2026-02-27T08:06:49.369Z",
+    "phase": "pull",
+    "status": 200,
+    "params": {
+      "cursor": "2026-02-27 08:06:44.208253+00",
+      "limit": 200
+    },
+    "body": {
+      "changes": [
+        {
+          "id": "714437b5-6dcb-49e8-9c4d-ba96e2491592",
+          "company_id": "66210464-9617-4dc4-9d77-989107bcaaad",
+          "owner_user_id": "8e4d2d8d-9e5f-4f7a-9a5e-3d6f9f1b2c77",
+          "source_scope": "personal",
+          "title": "UAT-09 offline title",
+          "content_markdown": "UAT-09 offline content",
+          "item_type": "text",
+          "matrix_media_mxc": null,
+          "matrix_media_name": null,
+          "matrix_media_mime": null,
+          "matrix_media_size": null,
+          "is_indexable": true,
+          "index_status": "pending",
+          "index_error": null,
+          "status": "deleted",
+          "revision": 2,
+          "created_at": "2026-02-27 08:06:42.11697+00",
+          "updated_at": "2026-02-27 08:06:47.186988+00"
+        }
+      ],
+      "next_cursor": "2026-02-27 08:06:47.186988+00",
+      "has_more": false
+    }
+  },
+  {
+    "ts": "2026-02-27T08:06:50.413Z",
+    "phase": "pull",
+    "status": 200,
+    "params": {
+      "cursor": "2026-02-27 08:06:47.186988+00",
+      "limit": 200
+    },
+    "body": {
+      "changes": [],
+      "next_cursor": "2026-02-27 08:06:47.186988+00",
+      "has_more": false
+    }
+  },
+  {
+    "ts": "2026-02-27T08:06:51.433Z",
+    "phase": "pull",
+    "status": 200,
+    "params": {
+      "cursor": "2026-02-27 08:06:47.186988+00",
+      "limit": 200
+    },
+    "body": {
+      "changes": [],
+      "next_cursor": "2026-02-27 08:06:47.186988+00",
+      "has_more": false
+    }
+  }
+]
