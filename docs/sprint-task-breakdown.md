@@ -244,20 +244,20 @@
 ## 2.3 UI（gotradetalk-ui）
 
 ### UI-01 左側 Notebook 模組頁
-- [ ] 進度: 未開始
+- [x] 進度: 已完成
 - 內容:
   - 列表、搜尋、CRUD、文件關聯
 - 對應 UAT: `UAT-01`, `UAT-02`
 
 ### UI-02 Capability 驅動顯示
-- [ ] 進度: 未開始
+- [x] 進度: 已完成
 - 內容:
   - 根據 `/me/capabilities` 控制顯示
   - client 隱藏 LLM 控件
 - 對應 UAT: `UAT-02`, `UAT-14`
 
 ### UI-03 聊天 AI 入口與輸出框
-- [ ] 進度: 未開始
+- [x] 進度: 已完成
 - 內容:
   - 工具列 AI 圖示
   - 訊息下方調用知識庫
@@ -265,14 +265,14 @@
 - 對應 UAT: `UAT-05`, `UAT-06`
 
 ### UI-04 引用展示與低信心提示
-- [ ] 進度: 未開始
+- [x] 進度: 已完成
 - 內容:
   - citations 渲染
   - confidence 提示與按鈕禁用
 - 對應 UAT: `UAT-07`, `UAT-08`
 
 ### UI-05 索引狀態提示
-- [ ] 進度: 未開始
+- [x] 進度: 已完成
 - 內容:
   - pending/running/success/failed UI
 - 對應 UAT: `UAT-03`
@@ -280,11 +280,11 @@
 ## 2.4 App 端與移動端（離線）
 
 ### APP-01 本地 SQLite 結構
-- [x] 進度: 已完成（實作 + E2E）
+- [x] 進度: 已完成（schema v1 + 實作 + E2E）
 - 內容:
   - 本地 item 表、oplog 表、cursor 表
 - 交付:
-  - `docs/app-offline-sync-spec.md`（第 2 節）
+  - `docs/app-offline-sync-spec.md`（第 2、3、4、7 節，v1）
   - `gotradetalk-client/visitor/src/notebook/store.ts`
 - 對應 UAT: `UAT-09`, `UAT-10`
 
@@ -300,7 +300,7 @@
 - 對應 UAT: `UAT-09`, `UAT-10`
 
 ### APP-03 自動同步引擎
-- [x] 進度: 已完成（實作 + E2E）
+- [x] 進度: 已完成（push/pull v1 + checkpoint + 退避 + E2E）
 - 內容:
   - 連網自動 push/pull
   - 重試與退避
@@ -311,7 +311,7 @@
 - 對應 UAT: `UAT-09`, `UAT-10`, `UAT-11`
 
 ### APP-04 衝突 UI
-- [x] 進度: 已完成（實作 + E2E）
+- [x] 進度: 已完成（LWW + conflict 副本 + E2E）
 - 內容:
   - 顯示衝突
   - 選擇本地版/雲端版
@@ -321,6 +321,7 @@
   - `gotradetalk-client/visitor/src/notebook/store.ts`
 - 測試:
   - `cd /Users/mac/Documents/github/gotradetalk-client/visitor && npm run test:e2e:notebook-sync`（PASS）
+  - `docs/uat-09-12-offline-sync-report.md`
 - 對應 UAT: `UAT-12`
 
 ## 3. 建議分 Sprint
