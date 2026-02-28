@@ -41,28 +41,28 @@ function buildLanguageInstruction(language: string): string {
   const lang = normalizeResponseLanguage(language)
 
   if (lang === 'zh-tw' || lang === 'zh_hant' || lang === 'zh-hant') {
-    return '請以繁體中文回答，並在最後輸出一行 CONFIDENCE:0~1。'
+    return '請以繁體中文回答。'
   }
   if (lang === 'zh-cn' || lang === 'zh_hans' || lang === 'zh-hans') {
-    return '請以簡體中文回答，並在最後輸出一行 CONFIDENCE:0~1。'
+    return '請以簡體中文回答。'
   }
   if (lang.startsWith('zh')) {
-    return '請以中文回答，並在最後輸出一行 CONFIDENCE:0~1。'
+    return '請以中文回答。'
   }
   if (lang.startsWith('en')) {
-    return 'Please answer in English and append one line at the end: CONFIDENCE:0~1.'
+    return 'Please answer in English.'
   }
   if (lang.startsWith('ja')) {
-    return '日本語で回答し、最後に1行で CONFIDENCE:0~1 を出力してください。'
+    return '日本語で回答してください。'
   }
   if (lang.startsWith('ko')) {
-    return '한국어로 답변하고 마지막 줄에 CONFIDENCE:0~1을 출력하세요.'
+    return '한국어로 답변하세요.'
   }
   if (lang.startsWith('vi')) {
-    return 'Vui lòng trả lời bằng tiếng Việt và thêm một dòng cuối: CONFIDENCE:0~1.'
+    return 'Vui lòng trả lời bằng tiếng Việt.'
   }
 
-  return `Please answer in ${language} and append one line at the end: CONFIDENCE:0~1.`
+  return `Please answer in ${language}.`
 }
 
 function normalizeBaseUrl(value: string) {
@@ -242,11 +242,13 @@ export async function generateAssistAnswer(
 
   const systemPrompt = [
     '你是「知識庫回答生成器」。',
-    '你只能依據提供的召回內容回答，不得使用外部常識補全。',
+    '你只能依據提供的召回內容回答，不得使用外部常識補全或糾正知識庫內容。',
+    '即使召回內容與常識衝突，也必須以召回內容為準。',
     '你必須輸出兩行，且只能兩行：',
     '總結歸納：{內容}',
     '參考答案：{內容}',
     '「參考答案」要可直接回覆、語氣自然且可執行。',
+    '若召回內容中存在可回答資訊，禁止輸出「知識庫未找到明確依據」。',
     '若證據不足，兩行都要明確寫「知識庫未找到明確依據」。',
     '禁止輸出 CONFIDENCE、禁止輸出額外段落、禁止空白行。'
   ].join('\n')
@@ -282,14 +284,31 @@ export async function generateAssistAnswer(
   }
 
   const body = await resp.json() as { choices?: Array<{ message?: { content?: string } }> }
-  const content = String(body.choices?.[0]?.message?.content || '').trim()
+  const content = String(body.choices?.[0]?.message?.content || '')
+    .replace(/\n?\s*CONFIDENCE\s*[:：]\s*(0(?:\.\d+)?|1(?:\.0+)?)\s*$/gi, '')
+    .trim()
 
   const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
   const summaryMatch = content.match(/總結歸納\s*[:：]\s*([\s\S]*?)(?:\n\s*參考答案\s*[:：]|$)/i)
   const referenceMatch = content.match(/參考答案\s*[:：]\s*([\s\S]*?)$/i)
   const fallbackLine = lines.find(Boolean) || '知識庫未找到明確依據'
-  const summary = String(summaryMatch?.[1] || fallbackLine).replace(/\s+/g, ' ').trim() || '知識庫未找到明確依據'
-  const referenceAnswer = String(referenceMatch?.[1] || summary).replace(/\s+/g, ' ').trim() || '知識庫未找到明確依據'
+  let summary = String(summaryMatch?.[1] || fallbackLine).replace(/\s+/g, ' ').trim() || '知識庫未找到明確依據'
+  let referenceAnswer = String(referenceMatch?.[1] || summary).replace(/\s+/g, ' ').trim() || '知識庫未找到明確依據'
+
+  const noEvidencePhrase = '知識庫未找到明確依據'
+  const hasAnyContext = contextBlocks.some((block) => String(block.text || '').trim().length > 0)
+  const saysNoEvidence = summary.includes(noEvidencePhrase) || referenceAnswer.includes(noEvidencePhrase)
+
+  // Guardrail: when retrieval has content, avoid contradictory "no evidence" output.
+  if (hasAnyContext && saysNoEvidence) {
+    const topBlock = contextBlocks.find((block) => String(block.text || '').trim().length > 0)
+    const topText = String(topBlock?.text || '').replace(/\s+/g, ' ').trim()
+    if (topText) {
+      summary = `根據召回內容，${topText}`
+      referenceAnswer = topText
+    }
+  }
+
   const answer = `總結歸納：${summary}\n參考答案：${referenceAnswer}`
 
   return { answer, summary, referenceAnswer }

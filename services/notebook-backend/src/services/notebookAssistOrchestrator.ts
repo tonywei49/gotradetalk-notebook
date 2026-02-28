@@ -75,6 +75,10 @@ export async function runNotebookAssist(params: {
 
   const { answer, summary, referenceAnswer } = await generateAssistAnswer(aiConfig, params.queryText, blocks, params.responseLang)
   const confidence = computeAssistConfidence(displaySources.map((source) => Number(source.score || 0)))
+  const noEvidencePhrase = '知識庫未找到明確依據'
+  const insufficientEvidence =
+    summary.includes(noEvidencePhrase)
+    && referenceAnswer.includes(noEvidencePhrase)
 
   await insertAssistLog({
     companyId: params.companyId,
@@ -112,7 +116,7 @@ export async function runNotebookAssist(params: {
     })),
     confidence,
     guardrail: {
-      insufficient_evidence: answer.includes('知識庫未找到明確依據')
+      insufficient_evidence: insufficientEvidence
     }
   }
 }

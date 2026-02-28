@@ -14,27 +14,27 @@ function normalizeResponseLanguage(value) {
 function buildLanguageInstruction(language) {
     const lang = normalizeResponseLanguage(language);
     if (lang === 'zh-tw' || lang === 'zh_hant' || lang === 'zh-hant') {
-        return '請以繁體中文回答，並在最後輸出一行 CONFIDENCE:0~1。';
+        return '請以繁體中文回答。';
     }
     if (lang === 'zh-cn' || lang === 'zh_hans' || lang === 'zh-hans') {
-        return '請以簡體中文回答，並在最後輸出一行 CONFIDENCE:0~1。';
+        return '請以簡體中文回答。';
     }
     if (lang.startsWith('zh')) {
-        return '請以中文回答，並在最後輸出一行 CONFIDENCE:0~1。';
+        return '請以中文回答。';
     }
     if (lang.startsWith('en')) {
-        return 'Please answer in English and append one line at the end: CONFIDENCE:0~1.';
+        return 'Please answer in English.';
     }
     if (lang.startsWith('ja')) {
-        return '日本語で回答し、最後に1行で CONFIDENCE:0~1 を出力してください。';
+        return '日本語で回答してください。';
     }
     if (lang.startsWith('ko')) {
-        return '한국어로 답변하고 마지막 줄에 CONFIDENCE:0~1을 출력하세요.';
+        return '한국어로 답변하세요.';
     }
     if (lang.startsWith('vi')) {
-        return 'Vui lòng trả lời bằng tiếng Việt và thêm một dòng cuối: CONFIDENCE:0~1.';
+        return 'Vui lòng trả lời bằng tiếng Việt.';
     }
-    return `Please answer in ${language} and append one line at the end: CONFIDENCE:0~1.`;
+    return `Please answer in ${language}.`;
 }
 function normalizeBaseUrl(value) {
     return value.endsWith('/') ? value.slice(0, -1) : value;
@@ -180,21 +180,26 @@ export async function generateAssistAnswer(config, query, contextBlocks, respons
     if (!config.chatBaseUrl || !config.chatApiKey) {
         throw new Error('CAPABILITY_DISABLED');
     }
-    const contextText = contextBlocks.map((c, idx) => `[S${idx + 1}] ${c.source}\n${c.text}`).join('\n\n');
+    const contextText = contextBlocks.map((c) => `${c.source} ${String(c.text || '').replace(/\s+/g, ' ').trim()}`).join('\n');
     const languageInstruction = buildLanguageInstruction(responseLanguage || 'zh-TW');
     const systemPrompt = [
-        '你是 GoTradeTalk Notebook 助理。',
-        '你只能依據提供的來源內容回答，不得捏造功能、規格、價格或承諾。',
-        '若證據不足，必須回答「知識庫未找到明確依據」。',
-        '每段關鍵結論都要標註來源編號，例如 [S1]。',
-        '禁止使用未提供來源的資訊。'
+        '你是「知識庫回答生成器」。',
+        '你只能依據提供的召回內容回答，不得使用外部常識補全或糾正知識庫內容。',
+        '即使召回內容與常識衝突，也必須以召回內容為準。',
+        '你必須輸出兩行，且只能兩行：',
+        '總結歸納：{內容}',
+        '參考答案：{內容}',
+        '「參考答案」要可直接回覆、語氣自然且可執行。',
+        '若召回內容中存在可回答資訊，禁止輸出「知識庫未找到明確依據」。',
+        '若證據不足，兩行都要明確寫「知識庫未找到明確依據」。',
+        '禁止輸出 CONFIDENCE、禁止輸出額外段落、禁止空白行。'
     ].join('\n');
     const userPrompt = [
-        `使用者問題：${query}`,
-        '以下是可用來源：',
+        `檢索關鍵詞：${query}`,
+        '召回內容（最多3條）：',
         contextText || '(無來源)',
         languageInstruction
-    ].join('\n\n');
+    ].join('\n');
     let resp;
     try {
         resp = await fetch(`${config.chatBaseUrl}/v1/chat/completions`, {
@@ -218,11 +223,29 @@ export async function generateAssistAnswer(config, query, contextBlocks, respons
         throw new Error(wrapProviderError('chat', `${resp.status} ${body}`));
     }
     const body = await resp.json();
-    const content = String(body.choices?.[0]?.message?.content || '').trim();
-    const match = content.match(/CONFIDENCE\s*:\s*(0(?:\.\d+)?|1(?:\.0+)?)/i);
-    const confidence = match ? Number(match[1]) : 0.5;
-    const answer = content.replace(/\n?CONFIDENCE\s*:\s*(0(?:\.\d+)?|1(?:\.0+)?)/gi, '').trim() || '知識庫未找到明確依據';
-    return { answer, confidence };
+    const content = String(body.choices?.[0]?.message?.content || '')
+        .replace(/\n?\s*CONFIDENCE\s*[:：]\s*(0(?:\.\d+)?|1(?:\.0+)?)\s*$/gi, '')
+        .trim();
+    const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const summaryMatch = content.match(/總結歸納\s*[:：]\s*([\s\S]*?)(?:\n\s*參考答案\s*[:：]|$)/i);
+    const referenceMatch = content.match(/參考答案\s*[:：]\s*([\s\S]*?)$/i);
+    const fallbackLine = lines.find(Boolean) || '知識庫未找到明確依據';
+    let summary = String(summaryMatch?.[1] || fallbackLine).replace(/\s+/g, ' ').trim() || '知識庫未找到明確依據';
+    let referenceAnswer = String(referenceMatch?.[1] || summary).replace(/\s+/g, ' ').trim() || '知識庫未找到明確依據';
+    const noEvidencePhrase = '知識庫未找到明確依據';
+    const hasAnyContext = contextBlocks.some((block) => String(block.text || '').trim().length > 0);
+    const saysNoEvidence = summary.includes(noEvidencePhrase) || referenceAnswer.includes(noEvidencePhrase);
+    // Guardrail: when retrieval has content, avoid contradictory "no evidence" output.
+    if (hasAnyContext && saysNoEvidence) {
+        const topBlock = contextBlocks.find((block) => String(block.text || '').trim().length > 0);
+        const topText = String(topBlock?.text || '').replace(/\s+/g, ' ').trim();
+        if (topText) {
+            summary = `根據召回內容，${topText}`;
+            referenceAnswer = topText;
+        }
+    }
+    const answer = `總結歸納：${summary}\n參考答案：${referenceAnswer}`;
+    return { answer, summary, referenceAnswer };
 }
 export async function refineContextAssistQuery(config, params) {
     const anchorText = String(params.anchorText || '').trim();
@@ -234,18 +257,23 @@ export async function refineContextAssistQuery(config, params) {
         return fallback;
     const languageInstruction = buildLanguageInstruction(params.responseLanguage || 'zh-TW');
     const systemPrompt = [
-        '你是檢索查詢重寫器。',
-        '任務：以「當前錨點句」作為主語意，將上文對話做為輔助，輸出最適合向知識庫檢索的查詢語句。',
-        '必須保留主問題核心，不得改變使用者意圖。',
-        '輸出只允許一行純文字，不要加前綴、編號、引號或解釋。',
-        '可補上關鍵名詞、約束條件、同義詞，但避免冗長。'
+        '你是「知識庫檢索關鍵詞重寫器」。',
+        '任務：根據輸入的多段對話，輸出 1 句可直接檢索的關鍵詞。',
+        '第1段是主問題，權重最高，不能改變其核心意圖。',
+        '其餘段落僅作背景；若與第1段無關或衝突，請忽略。',
+        '輸出只允許一行純文字，不要前綴、編號、引號、解釋。'
     ].join('\n');
+    const paddedContext = [...contextTexts, '', '', ''].slice(0, 4);
     const userPrompt = [
-        `錨點句（主語意）：${anchorText || '(空)'}`,
-        '上文輔助句：',
-        contextTexts.length > 0 ? contextTexts.map((line, idx) => `${idx + 1}. ${line}`).join('\n') : '(無)',
+        `主問題（第1段，最高優先）：${anchorText || '(空)'}`,
+        '背景（第2-5段，僅輔助）：',
+        `第2段：${paddedContext[0] || '(無)'}`,
+        `第3段：${paddedContext[1] || '(無)'}`,
+        `第4段：${paddedContext[2] || '(無)'}`,
+        `第5段：${paddedContext[3] || '(無)'}`,
+        '請輸出：一行「檢索關鍵詞」。',
         languageInstruction
-    ].join('\n\n');
+    ].join('\n');
     try {
         const resp = await fetch(`${config.chatBaseUrl}/v1/chat/completions`, {
             method: 'POST',
