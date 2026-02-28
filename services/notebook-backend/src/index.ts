@@ -41,6 +41,7 @@ import {
 
 const app = express()
 const port = Number(process.env.PORT || 4010)
+const jsonBodyLimit = String(process.env.JSON_BODY_LIMIT || '20mb').trim() || '20mb'
 
 const envCorsOrigins = (process.env.CORS_ORIGINS || '').split(',').map((item) => item.trim()).filter(Boolean)
 const defaultCorsOrigins = [
@@ -70,7 +71,8 @@ app.use(cors({
   optionsSuccessStatus: 204,
   credentials: true
 }))
-app.use(express.json())
+app.use(express.json({ limit: jsonBodyLimit }))
+app.use(express.urlencoded({ extended: true, limit: jsonBodyLimit }))
 
 app.get('/health', (_req, res) => res.json({ ok: true }))
 app.get('/version', (_req, res) => res.json({ ok: true, version: process.env.GIT_SHA || 'local', time: new Date().toISOString() }))
