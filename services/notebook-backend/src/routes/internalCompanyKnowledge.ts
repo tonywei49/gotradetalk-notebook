@@ -177,6 +177,9 @@ export async function createInternalCompanyKnowledgeItem(req: Request, res: Resp
     source_file_size?: number
     file_data_base64?: string
     is_indexable?: boolean
+    chunk_strategy?: string
+    chunk_size?: number
+    chunk_separator?: string
   }
 
   const title = normalizeText(body.title)
@@ -243,7 +246,10 @@ export async function createInternalCompanyKnowledgeItem(req: Request, res: Resp
         companyId,
         ownerUserId: profileId,
         itemId: item.id,
-        jobType: 'upsert'
+        jobType: 'upsert',
+        chunkStrategy: body.chunk_strategy || null,
+        chunkSize: body.chunk_size || null,
+        chunkSeparator: body.chunk_separator || null
       })
     }
 

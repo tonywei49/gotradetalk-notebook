@@ -15,7 +15,7 @@ import {
   searchChunksByQuery,
   upsertItemIndexState
 } from '../repos/notebookRepo.js'
-import { splitIntoChunks } from './notebookChunking.js'
+import { splitIntoChunks, splitIntoChunksByStrategy, type ChunkStrategy } from './notebookChunking.js'
 import { createEmbedding, getNotebookAiConfig, rerankCandidates } from './notebookLlm.js'
 import { deleteNotebookPointsByItem, ensureQdrantCollection, getQdrantConfig, searchNotebookVectors, upsertNotebookPoints } from './notebookQdrant.js'
 import { enqueueNotebookJobId } from './notebookQueue.js'
@@ -29,6 +29,9 @@ export async function enqueueNotebookIndexJob(params: {
   ownerUserId: string
   itemId: string
   jobType: 'upsert' | 'delete' | 'reindex'
+  chunkStrategy?: string | null
+  chunkSize?: number | null
+  chunkSeparator?: string | null
 }) {
   const data = await createIndexJob(params)
   if (data?.id) {
@@ -80,11 +83,15 @@ export async function runNotebookIndexJob(jobId: string, options?: { matrixBaseU
         }
       })
       let chunkIndexOffset = 0
+      const jobChunkStrategy = (job.chunk_strategy || 'smart') as ChunkStrategy
+      const jobChunkSize = job.chunk_size || Number(process.env.NOTEBOOK_CHUNK_SIZE || 1000)
+      const jobChunkSeparator = job.chunk_separator || undefined
       const chunks = extractedList.flatMap((extracted) => {
-        const sourceChunks = splitIntoChunks(
+        const sourceChunks = splitIntoChunksByStrategy(
           extracted.text,
-          Number(process.env.NOTEBOOK_CHUNK_SIZE || 1000),
-          Number(process.env.NOTEBOOK_CHUNK_OVERLAP || 200)
+          jobChunkStrategy,
+          jobChunkSize,
+          jobChunkSeparator
         )
         const mapped = sourceChunks.map((chunk, localIdx) => ({
           ...chunk,

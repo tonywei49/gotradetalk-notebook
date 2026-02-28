@@ -185,6 +185,9 @@ export async function createNotebookItem(req: Request, res: Response) {
     content_markdown?: string
     item_type?: 'text' | 'file'
     is_indexable?: boolean
+    chunk_strategy?: string
+    chunk_size?: number
+    chunk_separator?: string
   }
 
   const itemType = body.item_type === 'file' ? 'file' : 'text'
@@ -208,7 +211,10 @@ export async function createNotebookItem(req: Request, res: Response) {
         companyId: context.companyId,
         ownerUserId: context.userId,
         itemId: String(item.id),
-        jobType: 'upsert'
+        jobType: 'upsert',
+        chunkStrategy: body.chunk_strategy || null,
+        chunkSize: body.chunk_size || null,
+        chunkSeparator: body.chunk_separator || null
       })
     }
 
@@ -229,6 +235,9 @@ export async function createCompanyNotebookItem(req: Request, res: Response) {
     content_markdown?: string
     item_type?: 'text' | 'file'
     is_indexable?: boolean
+    chunk_strategy?: string
+    chunk_size?: number
+    chunk_separator?: string
   }
 
   const itemType = body.item_type === 'file' ? 'file' : 'text'
@@ -252,7 +261,10 @@ export async function createCompanyNotebookItem(req: Request, res: Response) {
         companyId: context.companyId,
         ownerUserId: context.userId,
         itemId: String(item.id),
-        jobType: 'upsert'
+        jobType: 'upsert',
+        chunkStrategy: body.chunk_strategy || null,
+        chunkSize: body.chunk_size || null,
+        chunkSeparator: body.chunk_separator || null
       })
     }
 
@@ -443,6 +455,9 @@ export async function attachNotebookFile(req: Request, res: Response) {
     matrix_media_mime?: string
     matrix_media_size?: number
     is_indexable?: boolean
+    chunk_strategy?: string
+    chunk_size?: number
+    chunk_separator?: string
   }
 
   const matrixMediaMxc = String(body.matrix_media_mxc || '').trim()
@@ -507,7 +522,10 @@ export async function attachNotebookFile(req: Request, res: Response) {
     companyId: context.companyId,
     ownerUserId: context.userId,
     itemId: id,
-    jobType: indexJobType
+    jobType: indexJobType,
+    chunkStrategy: body.chunk_strategy || null,
+    chunkSize: body.chunk_size || null,
+    chunkSeparator: body.chunk_separator || null
   })
 
   const indexJob = await getLatestIndexJobByItem(context.companyId, id)
@@ -710,11 +728,20 @@ export async function reindexNotebookItem(req: Request, res: Response) {
     index_error: null
   })
 
+  const reindexBody = req.body as {
+    chunk_strategy?: string
+    chunk_size?: number
+    chunk_separator?: string
+  }
+
   await enqueueNotebookIndexJob({
     companyId: context.companyId,
     ownerUserId: item.owner_user_id,
     itemId,
-    jobType: item.is_indexable ? 'upsert' : 'delete'
+    jobType: item.is_indexable ? 'upsert' : 'delete',
+    chunkStrategy: reindexBody.chunk_strategy || null,
+    chunkSize: reindexBody.chunk_size || null,
+    chunkSeparator: reindexBody.chunk_separator || null
   })
 
   const indexJob = await getLatestIndexJobByItem(context.companyId, itemId)

@@ -161,3 +161,81 @@ export function splitIntoChunks(text: string, chunkSize = 1000, overlap = 200): 
 
   return chunks
 }
+
+export type ChunkStrategy = 'smart' | 'paragraph' | 'heading' | 'custom'
+
+function splitByDelimiter(text: string, delimiter: string): string[] {
+  if (!delimiter) return [text]
+  return text.split(delimiter).map((s) => s.trim()).filter(Boolean)
+}
+
+function mergeSegments(segments: string[], chunkSize: number): TextChunk[] {
+  const safeSize = Math.max(300, Math.min(chunkSize, 2000))
+  const overlap = Math.min(Math.floor(safeSize * 0.2), 200)
+  const chunks: TextChunk[] = []
+  let buffer = ''
+  let index = 0
+
+  for (const segment of segments) {
+    if (buffer && (buffer.length + segment.length + 1) > safeSize) {
+      const piece = buffer.trim()
+      if (piece) {
+        chunks.push({
+          chunkIndex: index,
+          text: piece,
+          tokenCount: estimateTokenCount(piece),
+          contentHash: createHash('sha256').update(piece).digest('hex')
+        })
+        index += 1
+      }
+      const overlapText = piece.length > overlap ? piece.slice(-overlap) : ''
+      buffer = overlapText ? overlapText + '\n' + segment : segment
+    } else {
+      buffer = buffer ? buffer + '\n' + segment : segment
+    }
+  }
+
+  if (buffer.trim()) {
+    const piece = buffer.trim()
+    chunks.push({
+      chunkIndex: index,
+      text: piece,
+      tokenCount: estimateTokenCount(piece),
+      contentHash: createHash('sha256').update(piece).digest('hex')
+    })
+  }
+
+  return chunks
+}
+
+export function splitIntoChunksByStrategy(
+  text: string,
+  strategy: ChunkStrategy = 'smart',
+  chunkSize = 1000,
+  separator?: string
+): TextChunk[] {
+  const normalized = String(text || '').trim()
+  if (!normalized) return []
+
+  const safeSize = Math.max(300, Math.min(chunkSize, 2000))
+  const overlap = Math.min(Math.floor(safeSize * 0.2), 200)
+
+  if (strategy === 'smart') {
+    return splitIntoChunks(normalized, safeSize, overlap)
+  }
+
+  if (strategy === 'paragraph') {
+    const segments = splitByDelimiter(normalized, '\n\n')
+    return mergeSegments(segments, safeSize)
+  }
+
+  if (strategy === 'heading') {
+    const segments = normalized.split(/\n(?=#{1,2}\s+)/).map((s) => s.trim()).filter(Boolean)
+    return mergeSegments(segments, safeSize)
+  }
+
+  // custom
+  const customSep = separator || '\n'
+  const segments = splitByDelimiter(normalized, customSep)
+  return mergeSegments(segments, safeSize)
+}

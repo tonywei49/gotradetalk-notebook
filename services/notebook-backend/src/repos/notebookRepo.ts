@@ -48,6 +48,9 @@ export type NotebookIndexJobRow = {
   started_at: string | null
   finished_at: string | null
   created_at: string
+  chunk_strategy: string | null
+  chunk_size: number | null
+  chunk_separator: string | null
 }
 
 type SyncStatus = 'pending' | 'applied' | 'conflict' | 'rejected'
@@ -466,12 +469,15 @@ export async function createIndexJob(params: {
   ownerUserId: string
   itemId: string
   jobType: 'upsert' | 'delete' | 'reindex'
+  chunkStrategy?: string | null
+  chunkSize?: number | null
+  chunkSeparator?: string | null
 }): Promise<{ id: string }> {
   const result = await dbQuery<{ id: string }>(
-    `insert into public.notebook_index_jobs (company_id, owner_user_id, item_id, job_type, status)
-     values ($1, $2, $3, $4, 'pending')
+    `insert into public.notebook_index_jobs (company_id, owner_user_id, item_id, job_type, status, chunk_strategy, chunk_size, chunk_separator)
+     values ($1, $2, $3, $4, 'pending', $5, $6, $7)
      returning id::text as id`,
-    [params.companyId, params.ownerUserId, params.itemId, params.jobType]
+    [params.companyId, params.ownerUserId, params.itemId, params.jobType, params.chunkStrategy || null, params.chunkSize || null, params.chunkSeparator || null]
   )
 
   return result.rows[0]
@@ -526,7 +532,8 @@ export async function getIndexJobById(jobId: string): Promise<NotebookIndexJobRo
   const result = await dbQuery<any>(
     `select id::text as id, company_id::text as company_id, owner_user_id::text as owner_user_id,
             item_id::text as item_id, job_type::text as job_type, status::text as status,
-            error_message, started_at::text as started_at, finished_at::text as finished_at, created_at::text as created_at
+            error_message, started_at::text as started_at, finished_at::text as finished_at, created_at::text as created_at,
+            chunk_strategy, chunk_size, chunk_separator
      from public.notebook_index_jobs
      where id = $1
      limit 1`,
@@ -655,8 +662,8 @@ export async function searchChunksByQuery(params: {
   const scopeClause = scope === 'personal'
     ? `and i.source_scope = 'personal' and i.owner_user_id = $2 and c.owner_user_id = $2`
     : scope === 'company'
-    ? `and i.source_scope = 'company' and $2::uuid is not null`
-    : `and (i.source_scope = 'company' or (i.source_scope = 'personal' and i.owner_user_id = $2 and c.owner_user_id = $2))`
+      ? `and i.source_scope = 'company' and $2::uuid is not null`
+      : `and (i.source_scope = 'company' or (i.source_scope = 'personal' and i.owner_user_id = $2 and c.owner_user_id = $2))`
 
   const ftsResult = await dbQuery<{ item_id: string; chunk_index: number; chunk_text: string; source_locator: string | null; score: number; source_scope: 'personal' | 'company'; source_file_name: string | null }>(
     `select
@@ -752,8 +759,8 @@ export async function getNotebookItemSources(
   const scopeClause = scope === 'personal'
     ? `and source_scope = 'personal' and owner_user_id = $2`
     : scope === 'company'
-    ? `and source_scope = 'company' and $2::uuid is not null`
-    : `and (source_scope = 'company' or (source_scope = 'personal' and owner_user_id = $2))`
+      ? `and source_scope = 'company' and $2::uuid is not null`
+      : `and (source_scope = 'company' or (source_scope = 'personal' and owner_user_id = $2))`
   const result = await dbQuery<{ id: string; title: string | null; source_scope: 'personal' | 'company'; source_file_name: string | null }>(
     `select id::text as id, title, source_scope::text as source_scope, matrix_media_name as source_file_name
      from public.notebook_items
@@ -775,8 +782,8 @@ export async function getIndexableActiveItemIdSet(
   const scopeClause = scope === 'personal'
     ? `and source_scope = 'personal' and owner_user_id = $2`
     : scope === 'company'
-    ? `and source_scope = 'company' and $2::uuid is not null`
-    : `and (source_scope = 'company' or (source_scope = 'personal' and owner_user_id = $2))`
+      ? `and source_scope = 'company' and $2::uuid is not null`
+      : `and (source_scope = 'company' or (source_scope = 'personal' and owner_user_id = $2))`
 
   const result = await dbQuery<{ id: string }>(
     `select id::text as id
