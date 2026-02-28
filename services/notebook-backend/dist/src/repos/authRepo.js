@@ -78,7 +78,8 @@ export async function getCompanySettings(companyId) {
       notebook_ai_score_threshold,
       notebook_ai_max_context_tokens,
       notebook_ai_ocr_enabled,
-      notebook_ai_allow_low_confidence_send
+      notebook_ai_allow_low_confidence_send,
+      notebook_ai_upload_max_mb
      from public.company_settings
      where company_id = $1
      limit 1`, [companyId]);

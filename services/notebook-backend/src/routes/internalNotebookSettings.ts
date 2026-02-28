@@ -24,7 +24,8 @@ const NOTEBOOK_SETTINGS_COLUMNS = [
   'notebook_ai_score_threshold',
   'notebook_ai_max_context_tokens',
   'notebook_ai_ocr_enabled',
-  'notebook_ai_allow_low_confidence_send'
+  'notebook_ai_allow_low_confidence_send',
+  'notebook_ai_upload_max_mb'
 ] as const
 
 const ALLOWED_UPDATE_KEYS = new Set<string>(NOTEBOOK_SETTINGS_COLUMNS)

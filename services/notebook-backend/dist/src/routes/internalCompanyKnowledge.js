@@ -1,7 +1,7 @@
 import { createNotebookItem, getLatestIndexJobByItem, getNotebookItemByCompany, listNotebookItems, updateNotebookItemByOwner } from '../repos/notebookRepo.js';
 import { dbQuery } from '../db.js';
 import { enqueueNotebookIndexJob } from '../services/notebookIndexing.js';
-import { upsertInternalProfile } from '../repos/authRepo.js';
+import { getCompanySettings, upsertInternalProfile } from '../repos/authRepo.js';
 import { parseDocument } from '../services/notebookParsing.js';
 function getInternalSecret() {
     return String(process.env.NOTEBOOK_ADMIN_SYNC_SECRET || '').trim();
@@ -40,6 +40,19 @@ function parseStatus(value) {
 function normalizeText(value) {
     const normalized = String(value || '').trim();
     return normalized || null;
+}
+function resolveUploadMaxMb(value) {
+    const raw = Number(value ?? process.env.NOTEBOOK_UPLOAD_MAX_MB_DEFAULT ?? 20);
+    if (!Number.isFinite(raw) || raw <= 0)
+        return 20;
+    return Math.min(Math.max(Math.floor(raw), 1), 200);
+}
+function estimateBase64Bytes(base64) {
+    const cleaned = String(base64 || '').replace(/\s+/g, '');
+    if (!cleaned)
+        return 0;
+    const padding = cleaned.endsWith('==') ? 2 : cleaned.endsWith('=') ? 1 : 0;
+    return Math.floor((cleaned.length * 3) / 4) - padding;
 }
 function toKnowledgeItem(row, uploadedBy) {
     return {
@@ -134,6 +147,18 @@ export async function createInternalCompanyKnowledgeItem(req, res) {
     const fileDataBase64 = normalizeText(body.file_data_base64);
     const sourceFileName = normalizeText(body.source_file_name);
     const sourceFileMime = normalizeText(body.source_file_mime);
+    const companySettings = await getCompanySettings(companyId);
+    const uploadMaxMb = resolveUploadMaxMb(companySettings?.notebook_ai_upload_max_mb);
+    const uploadMaxBytes = uploadMaxMb * 1024 * 1024;
+    const declaredSize = Number(body.source_file_size || 0);
+    const estimatedSize = fileDataBase64 ? estimateBase64Bytes(fileDataBase64) : 0;
+    const payloadSize = Math.max(Number.isFinite(declaredSize) && declaredSize > 0 ? declaredSize : 0, estimatedSize);
+    if (payloadSize > uploadMaxBytes) {
+        return res.status(413).json({
+            code: 'FILE_TOO_LARGE',
+            message: `File exceeds upload limit (${uploadMaxMb}MB)`
+        });
+    }
     if (!contentMarkdown && fileDataBase64) {
         try {
             const decoded = Buffer.from(fileDataBase64, 'base64');

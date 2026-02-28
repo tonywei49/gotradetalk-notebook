@@ -31,15 +31,16 @@ export async function getCompanyNotebookAiSettings(req: Request, res: Response) 
     capabilityType: 'notebook_ai'
   })
 
-  return res.json(
-    mapPolicyResponse(
+  return res.json({
+    ...mapPolicyResponse(
       policy,
       'notebook_ai_enabled',
       'notebook_ai_expire_at',
       'notebook_ai_quota_monthly_requests',
       'notebook_ai_quota_used_monthly_requests'
-    )
-  )
+    ),
+    notebook_upload_max_mb: Number(context.policy.notebook_upload_max_mb || 20)
+  })
 }
 
 export async function getCompanyTranslationSettings(req: Request, res: Response) {
@@ -74,4 +75,3 @@ export async function rejectManagedTranslationUpdate(req: Request, res: Response
   if (!context) return
   return sendNotebookError(res, 403, 'MANAGED_BY_PLATFORM')
 }
-

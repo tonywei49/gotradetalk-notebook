@@ -17,6 +17,12 @@ function toRole(userType, isEmployee) {
 function dedupeCapabilities(values) {
     return Array.from(new Set(values.filter(Boolean)));
 }
+function resolveUploadMaxMb(value) {
+    const raw = Number(value ?? process.env.NOTEBOOK_UPLOAD_MAX_MB_DEFAULT ?? 20);
+    if (!Number.isFinite(raw) || raw <= 0)
+        return 20;
+    return Math.min(Math.max(Math.floor(raw), 1), 200);
+}
 export function sendNotebookError(res, status, code, message) {
     return res.status(status).json({ code, message: message || code });
 }
@@ -53,7 +59,8 @@ export async function resolveNotebookAccessContext(req) {
         retrieval_top_k: Number(settings?.notebook_ai_retrieval_top_k || 5),
         score_threshold: Number(settings?.notebook_ai_score_threshold || 0.35),
         max_context_tokens: Number(settings?.notebook_ai_max_context_tokens || 4096),
-        ocr_enabled: Boolean(settings?.notebook_ai_ocr_enabled)
+        ocr_enabled: Boolean(settings?.notebook_ai_ocr_enabled),
+        notebook_upload_max_mb: resolveUploadMaxMb(settings?.notebook_ai_upload_max_mb)
     };
     const capabilities = [NOTEBOOK_BASIC_CAPABILITY];
     if (policy.notebook_ai_enabled) {

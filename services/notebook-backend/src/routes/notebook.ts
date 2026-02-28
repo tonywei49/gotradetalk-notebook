@@ -92,6 +92,12 @@ function ensureCompanyKnowledgeAdmin(context: NotebookAccessContext, res: Respon
   return true
 }
 
+function resolveUploadLimitBytes(context: NotebookAccessContext): number {
+  const mb = Number(context.policy.notebook_upload_max_mb || 20)
+  const normalized = Number.isFinite(mb) && mb > 0 ? Math.min(Math.max(Math.floor(mb), 1), 200) : 20
+  return normalized * 1024 * 1024
+}
+
 async function withItemFiles<T extends { id: string }>(context: { companyId: string; userId: string }, item: T | null) {
   if (!item) return null
   const files = await listNotebookItemFilesByItem(context.companyId, context.userId, item.id)
@@ -443,6 +449,18 @@ export async function attachNotebookFile(req: Request, res: Response) {
   if (!matrixMediaMxc) {
     return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing matrix_media_mxc')
   }
+  const matrixMediaSize = Number(body.matrix_media_size || 0)
+  if (Number.isFinite(matrixMediaSize) && matrixMediaSize > 0) {
+    const maxBytes = resolveUploadLimitBytes(context)
+    if (matrixMediaSize > maxBytes) {
+      return sendNotebookError(
+        res,
+        413,
+        'FILE_TOO_LARGE',
+        `File exceeds upload limit (${context.policy.notebook_upload_max_mb}MB)`
+      )
+    }
+  }
 
   const supported = ['pdf', 'docx', 'csv', 'xlsx', 'txt', 'md', 'jpg', 'jpeg', 'png', 'webp']
   const fileName = String(body.matrix_media_name || '').toLowerCase()
@@ -466,7 +484,7 @@ export async function attachNotebookFile(req: Request, res: Response) {
     matrixMediaMxc,
     matrixMediaName: body.matrix_media_name || null,
     matrixMediaMime: body.matrix_media_mime || null,
-    matrixMediaSize: body.matrix_media_size || null,
+    matrixMediaSize: Number.isFinite(matrixMediaSize) && matrixMediaSize > 0 ? matrixMediaSize : null,
     isIndexable: body.is_indexable !== false
   })
 

@@ -41,7 +41,7 @@ import {
 
 const app = express()
 const port = Number(process.env.PORT || 4010)
-const jsonBodyLimit = String(process.env.JSON_BODY_LIMIT || '20mb').trim() || '20mb'
+const jsonBodyLimit = String(process.env.JSON_BODY_LIMIT || '35mb').trim() || '35mb'
 
 const envCorsOrigins = (process.env.CORS_ORIGINS || '').split(',').map((item) => item.trim()).filter(Boolean)
 const defaultCorsOrigins = [

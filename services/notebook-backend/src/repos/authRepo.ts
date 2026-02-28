@@ -38,6 +38,7 @@ export type CompanySettingsRow = {
   notebook_ai_max_context_tokens: number
   notebook_ai_ocr_enabled: boolean
   notebook_ai_allow_low_confidence_send: boolean
+  notebook_ai_upload_max_mb: number | null
 }
 
 export async function getProfileById(profileId: string): Promise<ProfileRow | null> {
@@ -153,7 +154,8 @@ export async function getCompanySettings(companyId: string): Promise<CompanySett
       notebook_ai_score_threshold,
       notebook_ai_max_context_tokens,
       notebook_ai_ocr_enabled,
-      notebook_ai_allow_low_confidence_send
+      notebook_ai_allow_low_confidence_send,
+      notebook_ai_upload_max_mb
      from public.company_settings
      where company_id = $1
      limit 1`,

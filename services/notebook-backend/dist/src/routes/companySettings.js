@@ -26,7 +26,10 @@ export async function getCompanyNotebookAiSettings(req, res) {
         subjectId: context.companyId,
         capabilityType: 'notebook_ai'
     });
-    return res.json(mapPolicyResponse(policy, 'notebook_ai_enabled', 'notebook_ai_expire_at', 'notebook_ai_quota_monthly_requests', 'notebook_ai_quota_used_monthly_requests'));
+    return res.json({
+        ...mapPolicyResponse(policy, 'notebook_ai_enabled', 'notebook_ai_expire_at', 'notebook_ai_quota_monthly_requests', 'notebook_ai_quota_used_monthly_requests'),
+        notebook_upload_max_mb: Number(context.policy.notebook_upload_max_mb || 20)
+    });
 }
 export async function getCompanyTranslationSettings(req, res) {
     const context = await resolveCompanyContext(req, res);

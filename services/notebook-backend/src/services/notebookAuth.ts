@@ -28,6 +28,7 @@ export type NotebookAccessContext = {
     score_threshold: number
     max_context_tokens: number
     ocr_enabled: boolean
+    notebook_upload_max_mb: number
   }
 }
 
@@ -44,6 +45,12 @@ function toRole(userType: string | undefined, isEmployee: boolean): NotebookRole
 
 function dedupeCapabilities(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)))
+}
+
+function resolveUploadMaxMb(value: unknown): number {
+  const raw = Number(value ?? process.env.NOTEBOOK_UPLOAD_MAX_MB_DEFAULT ?? 20)
+  if (!Number.isFinite(raw) || raw <= 0) return 20
+  return Math.min(Math.max(Math.floor(raw), 1), 200)
 }
 
 export function sendNotebookError(res: Response, status: number, code: string, message?: string) {
@@ -87,7 +94,8 @@ export async function resolveNotebookAccessContext(req: Request): Promise<Notebo
     retrieval_top_k: Number(settings?.notebook_ai_retrieval_top_k || 5),
     score_threshold: Number(settings?.notebook_ai_score_threshold || 0.35),
     max_context_tokens: Number(settings?.notebook_ai_max_context_tokens || 4096),
-    ocr_enabled: Boolean(settings?.notebook_ai_ocr_enabled)
+    ocr_enabled: Boolean(settings?.notebook_ai_ocr_enabled),
+    notebook_upload_max_mb: resolveUploadMaxMb(settings?.notebook_ai_upload_max_mb)
   }
 
   const capabilities = [NOTEBOOK_BASIC_CAPABILITY]

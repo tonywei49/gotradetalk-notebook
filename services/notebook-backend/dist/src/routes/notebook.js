@@ -57,6 +57,11 @@ function ensureCompanyKnowledgeAdmin(context, res) {
     }
     return true;
 }
+function resolveUploadLimitBytes(context) {
+    const mb = Number(context.policy.notebook_upload_max_mb || 20);
+    const normalized = Number.isFinite(mb) && mb > 0 ? Math.min(Math.max(Math.floor(mb), 1), 200) : 20;
+    return normalized * 1024 * 1024;
+}
 async function withItemFiles(context, item) {
     if (!item)
         return null;
@@ -365,6 +370,13 @@ export async function attachNotebookFile(req, res) {
     if (!matrixMediaMxc) {
         return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing matrix_media_mxc');
     }
+    const matrixMediaSize = Number(body.matrix_media_size || 0);
+    if (Number.isFinite(matrixMediaSize) && matrixMediaSize > 0) {
+        const maxBytes = resolveUploadLimitBytes(context);
+        if (matrixMediaSize > maxBytes) {
+            return sendNotebookError(res, 413, 'FILE_TOO_LARGE', `File exceeds upload limit (${context.policy.notebook_upload_max_mb}MB)`);
+        }
+    }
     const supported = ['pdf', 'docx', 'csv', 'xlsx', 'txt', 'md', 'jpg', 'jpeg', 'png', 'webp'];
     const fileName = String(body.matrix_media_name || '').toLowerCase();
     const mime = String(body.matrix_media_mime || '').toLowerCase();
@@ -384,7 +396,7 @@ export async function attachNotebookFile(req, res) {
         matrixMediaMxc,
         matrixMediaName: body.matrix_media_name || null,
         matrixMediaMime: body.matrix_media_mime || null,
-        matrixMediaSize: body.matrix_media_size || null,
+        matrixMediaSize: Number.isFinite(matrixMediaSize) && matrixMediaSize > 0 ? matrixMediaSize : null,
         isIndexable: body.is_indexable !== false
     });
     const item = await updateNotebookItemByOwner(context.companyId, context.userId, id, {
