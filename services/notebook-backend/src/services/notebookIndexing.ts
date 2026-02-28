@@ -15,7 +15,7 @@ import {
   searchChunksByQuery,
   upsertItemIndexState
 } from '../repos/notebookRepo.js'
-import { splitIntoChunks, splitIntoChunksByStrategy, type ChunkStrategy } from './notebookChunking.js'
+import { splitIntoChunksByStrategy, type ChunkStrategy } from './notebookChunking.js'
 import { createEmbedding, getNotebookAiConfig, rerankCandidates } from './notebookLlm.js'
 import { deleteNotebookPointsByItem, ensureQdrantCollection, getQdrantConfig, searchNotebookVectors, upsertNotebookPoints } from './notebookQdrant.js'
 import { enqueueNotebookJobId } from './notebookQueue.js'
@@ -86,6 +86,7 @@ export async function runNotebookIndexJob(jobId: string, options?: { matrixBaseU
       const jobChunkStrategy = (job.chunk_strategy || 'smart') as ChunkStrategy
       const jobChunkSize = job.chunk_size || Number(process.env.NOTEBOOK_CHUNK_SIZE || 1000)
       const jobChunkSeparator = job.chunk_separator || undefined
+      console.log(`[notebookIndexing] job=${job.id} chunk_strategy=${job.chunk_strategy} → ${jobChunkStrategy}, chunk_size=${job.chunk_size} → ${jobChunkSize}, chunk_separator=${JSON.stringify(job.chunk_separator)}`)
       const chunks = extractedList.flatMap((extracted) => {
         const sourceChunks = splitIntoChunksByStrategy(
           extracted.text,

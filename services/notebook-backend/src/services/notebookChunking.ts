@@ -169,40 +169,43 @@ function splitByDelimiter(text: string, delimiter: string): string[] {
   return text.split(delimiter).map((s) => s.trim()).filter(Boolean)
 }
 
-function mergeSegments(segments: string[], chunkSize: number): TextChunk[] {
+/**
+ * Convert delimiter-split segments into chunks.
+ * Each segment becomes its own chunk.
+ * Segments larger than chunkSize are sub-split by the smart algorithm.
+ */
+function segmentsToChunks(segments: string[], chunkSize: number): TextChunk[] {
   const safeSize = Math.max(300, Math.min(chunkSize, 2000))
-  const overlap = Math.min(Math.floor(safeSize * 0.2), 200)
   const chunks: TextChunk[] = []
-  let buffer = ''
   let index = 0
 
   for (const segment of segments) {
-    if (buffer && (buffer.length + segment.length + 1) > safeSize) {
-      const piece = buffer.trim()
-      if (piece) {
+    const trimmed = segment.trim()
+    if (!trimmed) continue
+
+    if (trimmed.length <= safeSize) {
+      // Segment fits → one chunk
+      chunks.push({
+        chunkIndex: index,
+        text: trimmed,
+        tokenCount: estimateTokenCount(trimmed),
+        contentHash: createHash('sha256').update(trimmed).digest('hex')
+      })
+      index += 1
+    } else {
+      // Segment too large → sub-split using smart algorithm
+      const overlap = Math.min(Math.floor(safeSize * 0.2), 200)
+      const subChunks = splitIntoChunks(trimmed, safeSize, overlap)
+      for (const sub of subChunks) {
         chunks.push({
           chunkIndex: index,
-          text: piece,
-          tokenCount: estimateTokenCount(piece),
-          contentHash: createHash('sha256').update(piece).digest('hex')
+          text: sub.text,
+          tokenCount: sub.tokenCount,
+          contentHash: sub.contentHash
         })
         index += 1
       }
-      const overlapText = piece.length > overlap ? piece.slice(-overlap) : ''
-      buffer = overlapText ? overlapText + '\n' + segment : segment
-    } else {
-      buffer = buffer ? buffer + '\n' + segment : segment
     }
-  }
-
-  if (buffer.trim()) {
-    const piece = buffer.trim()
-    chunks.push({
-      chunkIndex: index,
-      text: piece,
-      tokenCount: estimateTokenCount(piece),
-      contentHash: createHash('sha256').update(piece).digest('hex')
-    })
   }
 
   return chunks
@@ -226,16 +229,16 @@ export function splitIntoChunksByStrategy(
 
   if (strategy === 'paragraph') {
     const segments = splitByDelimiter(normalized, '\n\n')
-    return mergeSegments(segments, safeSize)
+    return segmentsToChunks(segments, safeSize)
   }
 
   if (strategy === 'heading') {
     const segments = normalized.split(/\n(?=#{1,2}\s+)/).map((s) => s.trim()).filter(Boolean)
-    return mergeSegments(segments, safeSize)
+    return segmentsToChunks(segments, safeSize)
   }
 
   // custom
   const customSep = separator || '\n'
   const segments = splitByDelimiter(normalized, customSep)
-  return mergeSegments(segments, safeSize)
+  return segmentsToChunks(segments, safeSize)
 }
