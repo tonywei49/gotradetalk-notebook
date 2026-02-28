@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express'
 import {
   createNotebookItem,
+  getLatestChunkSettingsByItem,
   getLatestIndexJobByItem,
   getNotebookItemByCompany,
   listNotebookItems,
@@ -360,11 +361,18 @@ export async function retryInternalCompanyKnowledgeIndex(req: Request, res: Resp
     index_error: null
   })
 
+  const latestChunk = item.is_indexable
+    ? await getLatestChunkSettingsByItem(companyId, itemId)
+    : null
+
   await enqueueNotebookIndexJob({
     companyId,
     ownerUserId: item.owner_user_id,
     itemId,
-    jobType: item.is_indexable ? 'upsert' : 'delete'
+    jobType: item.is_indexable ? 'upsert' : 'delete',
+    chunkStrategy: latestChunk?.chunk_strategy || null,
+    chunkSize: latestChunk?.chunk_size || null,
+    chunkSeparator: latestChunk?.chunk_separator || null
   })
 
   const indexJob = await getLatestIndexJobByItem(companyId, itemId)

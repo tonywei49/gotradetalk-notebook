@@ -128,3 +128,70 @@ export function splitIntoChunks(text, chunkSize = 1000, overlap = 200) {
     }
     return chunks;
 }
+function splitByDelimiter(text, delimiter) {
+    if (!delimiter)
+        return [text];
+    return text.split(delimiter).map((s) => s.trim()).filter(Boolean);
+}
+/**
+ * Convert delimiter-split segments into chunks.
+ * Each segment becomes its own chunk.
+ * Segments larger than chunkSize are sub-split by the smart algorithm.
+ */
+function segmentsToChunks(segments, chunkSize) {
+    const safeSize = Math.max(300, Math.min(chunkSize, 2000));
+    const chunks = [];
+    let index = 0;
+    for (const segment of segments) {
+        const trimmed = segment.trim();
+        if (!trimmed)
+            continue;
+        if (trimmed.length <= safeSize) {
+            // Segment fits → one chunk
+            chunks.push({
+                chunkIndex: index,
+                text: trimmed,
+                tokenCount: estimateTokenCount(trimmed),
+                contentHash: createHash('sha256').update(trimmed).digest('hex')
+            });
+            index += 1;
+        }
+        else {
+            // Segment too large → sub-split using smart algorithm
+            const overlap = Math.min(Math.floor(safeSize * 0.2), 200);
+            const subChunks = splitIntoChunks(trimmed, safeSize, overlap);
+            for (const sub of subChunks) {
+                chunks.push({
+                    chunkIndex: index,
+                    text: sub.text,
+                    tokenCount: sub.tokenCount,
+                    contentHash: sub.contentHash
+                });
+                index += 1;
+            }
+        }
+    }
+    return chunks;
+}
+export function splitIntoChunksByStrategy(text, strategy = 'smart', chunkSize = 1000, separator) {
+    const normalized = String(text || '').trim();
+    if (!normalized)
+        return [];
+    const safeSize = Math.max(300, Math.min(chunkSize, 2000));
+    const overlap = Math.min(Math.floor(safeSize * 0.2), 200);
+    if (strategy === 'smart') {
+        return splitIntoChunks(normalized, safeSize, overlap);
+    }
+    if (strategy === 'paragraph') {
+        const segments = splitByDelimiter(normalized, '\n\n');
+        return segmentsToChunks(segments, safeSize);
+    }
+    if (strategy === 'heading') {
+        const segments = normalized.split(/\n(?=#{1,2}\s+)/).map((s) => s.trim()).filter(Boolean);
+        return segmentsToChunks(segments, safeSize);
+    }
+    // custom
+    const customSep = separator || '\n';
+    const segments = splitByDelimiter(normalized, customSep);
+    return segmentsToChunks(segments, safeSize);
+}

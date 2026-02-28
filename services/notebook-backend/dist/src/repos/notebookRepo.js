@@ -259,9 +259,9 @@ export async function syncNotebookItemPrimaryFileFromLatest(companyId, ownerUser
     });
 }
 export async function createIndexJob(params) {
-    const result = await dbQuery(`insert into public.notebook_index_jobs (company_id, owner_user_id, item_id, job_type, status)
-     values ($1, $2, $3, $4, 'pending')
-     returning id::text as id`, [params.companyId, params.ownerUserId, params.itemId, params.jobType]);
+    const result = await dbQuery(`insert into public.notebook_index_jobs (company_id, owner_user_id, item_id, job_type, status, chunk_strategy, chunk_size, chunk_separator)
+     values ($1, $2, $3, $4, 'pending', $5, $6, $7)
+     returning id::text as id`, [params.companyId, params.ownerUserId, params.itemId, params.jobType, params.chunkStrategy || null, params.chunkSize || null, params.chunkSeparator || null]);
     return result.rows[0];
 }
 export async function getLatestIndexJobByItem(companyId, itemId) {
@@ -270,6 +270,16 @@ export async function getLatestIndexJobByItem(companyId, itemId) {
      where company_id = $1 and item_id = $2
      order by created_at desc
      limit 1`, [companyId, itemId]);
+    return result.rows[0] || null;
+}
+export async function getLatestChunkSettingsByItem(companyId, itemId) {
+    const result = await dbQuery(`select chunk_strategy, chunk_size, chunk_separator
+       from public.notebook_index_jobs
+      where company_id = $1
+        and item_id = $2
+        and (chunk_strategy is not null or chunk_size is not null or chunk_separator is not null)
+      order by created_at desc
+      limit 1`, [companyId, itemId]);
     return result.rows[0] || null;
 }
 export async function getIndexJobByOwner(jobId, companyId, ownerUserId) {
@@ -294,7 +304,8 @@ export async function markIndexJobPending(jobId) {
 export async function getIndexJobById(jobId) {
     const result = await dbQuery(`select id::text as id, company_id::text as company_id, owner_user_id::text as owner_user_id,
             item_id::text as item_id, job_type::text as job_type, status::text as status,
-            error_message, started_at::text as started_at, finished_at::text as finished_at, created_at::text as created_at
+            error_message, started_at::text as started_at, finished_at::text as finished_at, created_at::text as created_at,
+            chunk_strategy, chunk_size, chunk_separator
      from public.notebook_index_jobs
      where id = $1
      limit 1`, [jobId]);

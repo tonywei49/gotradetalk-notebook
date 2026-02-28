@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { createIndexJob, deleteChunksByItem, getIndexJobById, listActiveNotebookItemFilesByItem, getNotebookItemByCompany, getIndexableActiveItemIdSet, getNotebookItemSources, listPendingIndexJobIds, markIndexJobFailed, markIndexJobRunning, markIndexJobSuccess, replaceItemChunks, searchChunksByQuery, upsertItemIndexState } from '../repos/notebookRepo.js';
-import { splitIntoChunks } from './notebookChunking.js';
+import { splitIntoChunksByStrategy } from './notebookChunking.js';
 import { createEmbedding, getNotebookAiConfig, rerankCandidates } from './notebookLlm.js';
 import { deleteNotebookPointsByItem, ensureQdrantCollection, getQdrantConfig, searchNotebookVectors, upsertNotebookPoints } from './notebookQdrant.js';
 import { enqueueNotebookJobId } from './notebookQueue.js';
@@ -53,8 +53,12 @@ export async function runNotebookIndexJob(jobId, options) {
                 }
             });
             let chunkIndexOffset = 0;
+            const jobChunkStrategy = (job.chunk_strategy || 'smart');
+            const jobChunkSize = job.chunk_size || Number(process.env.NOTEBOOK_CHUNK_SIZE || 1000);
+            const jobChunkSeparator = job.chunk_separator || undefined;
+            console.log(`[notebookIndexing] job=${job.id} chunk_strategy=${job.chunk_strategy} → ${jobChunkStrategy}, chunk_size=${job.chunk_size} → ${jobChunkSize}, chunk_separator=${JSON.stringify(job.chunk_separator)}`);
             const chunks = extractedList.flatMap((extracted) => {
-                const sourceChunks = splitIntoChunks(extracted.text, Number(process.env.NOTEBOOK_CHUNK_SIZE || 1000), Number(process.env.NOTEBOOK_CHUNK_OVERLAP || 200));
+                const sourceChunks = splitIntoChunksByStrategy(extracted.text, jobChunkStrategy, jobChunkSize, jobChunkSeparator);
                 const mapped = sourceChunks.map((chunk, localIdx) => ({
                     ...chunk,
                     chunkIndex: chunkIndexOffset + localIdx,

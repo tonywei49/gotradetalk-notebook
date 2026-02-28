@@ -7,6 +7,7 @@ import {
   getNotebookChunkStatsByItem,
   getNotebookItemAccessible,
   getNotebookItemByCompany,
+  getLatestChunkSettingsByItem,
   getLatestActiveNotebookItemFile,
   getNotebookItemFileByOwner,
   getIndexJobByOwner,
@@ -82,6 +83,41 @@ function parseScope(value: unknown): 'personal' | 'company' | 'both' {
   const scope = String(value || '').trim().toLowerCase()
   if (scope === 'personal' || scope === 'company') return scope
   return 'both'
+}
+
+type ChunkSettingsInput = {
+  chunk_strategy?: string
+  chunk_size?: number
+  chunk_separator?: string
+}
+
+async function resolveChunkSettingsForItem(
+  companyId: string,
+  itemId: string,
+  input?: ChunkSettingsInput
+): Promise<{ chunkStrategy: string | null; chunkSize: number | null; chunkSeparator: string | null }> {
+  const hasExplicitChunkSetting = input && (
+    input.chunk_strategy !== undefined
+    || input.chunk_size !== undefined
+    || input.chunk_separator !== undefined
+  )
+
+  if (hasExplicitChunkSetting) {
+    return {
+      chunkStrategy: String(input?.chunk_strategy || '').trim() || null,
+      chunkSize: Number.isFinite(Number(input?.chunk_size)) && Number(input?.chunk_size) > 0
+        ? Number(input?.chunk_size)
+        : null,
+      chunkSeparator: String(input?.chunk_separator || '') || null
+    }
+  }
+
+  const latest = await getLatestChunkSettingsByItem(companyId, itemId)
+  return {
+    chunkStrategy: latest?.chunk_strategy || null,
+    chunkSize: latest?.chunk_size || null,
+    chunkSeparator: latest?.chunk_separator || null
+  }
 }
 
 function ensureCompanyKnowledgeAdmin(context: NotebookAccessContext, res: Response) {
@@ -294,6 +330,9 @@ export async function updateCompanyNotebookItem(req: Request, res: Response) {
     is_indexable?: boolean
     status?: 'active' | 'deleted'
     revision?: number
+    chunk_strategy?: string
+    chunk_size?: number
+    chunk_separator?: string
   }
   if (body.revision !== undefined && Number(body.revision) !== Number(existing.revision)) {
     return sendNotebookError(res, 409, 'REVISION_CONFLICT')
@@ -315,11 +354,17 @@ export async function updateCompanyNotebookItem(req: Request, res: Response) {
   if (!item) return sendNotebookError(res, 404, 'NOT_FOUND')
 
   const shouldIndex = Boolean((updates.is_indexable ?? existing.is_indexable) === true)
+  const chunkSettings = shouldIndex
+    ? await resolveChunkSettingsForItem(context.companyId, id, body)
+    : { chunkStrategy: null, chunkSize: null, chunkSeparator: null }
   await enqueueNotebookIndexJob({
     companyId: context.companyId,
     ownerUserId: existing.owner_user_id,
     itemId: id,
-    jobType: shouldIndex ? 'upsert' : 'delete'
+    jobType: shouldIndex ? 'upsert' : 'delete',
+    chunkStrategy: chunkSettings.chunkStrategy,
+    chunkSize: chunkSettings.chunkSize,
+    chunkSeparator: chunkSettings.chunkSeparator
   })
 
   return res.json({ item })
@@ -372,6 +417,9 @@ export async function updateNotebookItem(req: Request, res: Response) {
     is_indexable?: boolean
     status?: 'active' | 'deleted'
     revision?: number
+    chunk_strategy?: string
+    chunk_size?: number
+    chunk_separator?: string
   }
 
   if (body.revision !== undefined && Number(body.revision) !== Number(existing.revision)) {
@@ -398,11 +446,17 @@ export async function updateNotebookItem(req: Request, res: Response) {
     }
 
     const shouldIndex = Boolean((updates.is_indexable ?? existing.is_indexable) === true)
+    const chunkSettings = shouldIndex
+      ? await resolveChunkSettingsForItem(context.companyId, id, body)
+      : { chunkStrategy: null, chunkSize: null, chunkSeparator: null }
     await enqueueNotebookIndexJob({
       companyId: context.companyId,
       ownerUserId: context.userId,
       itemId: id,
-      jobType: shouldIndex ? 'upsert' : 'delete'
+      jobType: shouldIndex ? 'upsert' : 'delete',
+      chunkStrategy: chunkSettings.chunkStrategy,
+      chunkSize: chunkSettings.chunkSize,
+      chunkSeparator: chunkSettings.chunkSeparator
     })
 
     return res.json({ item: await withItemFiles(context, item), conflict: false })
@@ -581,11 +635,18 @@ export async function deleteNotebookItemFile(req: Request, res: Response) {
 
   if (!updated) return sendNotebookError(res, 404, 'NOT_FOUND')
 
+  const shouldIndex = Boolean(latest?.is_indexable)
+  const chunkSettings = shouldIndex
+    ? await resolveChunkSettingsForItem(context.companyId, id)
+    : { chunkStrategy: null, chunkSize: null, chunkSeparator: null }
   await enqueueNotebookIndexJob({
     companyId: context.companyId,
     ownerUserId: context.userId,
     itemId: id,
-    jobType: latest?.is_indexable ? 'upsert' : 'delete'
+    jobType: shouldIndex ? 'upsert' : 'delete',
+    chunkStrategy: chunkSettings.chunkStrategy,
+    chunkSize: chunkSettings.chunkSize,
+    chunkSeparator: chunkSettings.chunkSeparator
   })
 
   return res.status(202).json({ ok: true, item: await withItemFiles(context, updated) })
@@ -733,15 +794,16 @@ export async function reindexNotebookItem(req: Request, res: Response) {
     chunk_size?: number
     chunk_separator?: string
   }
+  const chunkSettings = await resolveChunkSettingsForItem(context.companyId, itemId, reindexBody)
 
   await enqueueNotebookIndexJob({
     companyId: context.companyId,
     ownerUserId: item.owner_user_id,
     itemId,
     jobType: item.is_indexable ? 'upsert' : 'delete',
-    chunkStrategy: reindexBody.chunk_strategy || null,
-    chunkSize: reindexBody.chunk_size || null,
-    chunkSeparator: reindexBody.chunk_separator || null
+    chunkStrategy: chunkSettings.chunkStrategy,
+    chunkSize: chunkSettings.chunkSize,
+    chunkSeparator: chunkSettings.chunkSeparator
   })
 
   const indexJob = await getLatestIndexJobByItem(context.companyId, itemId)

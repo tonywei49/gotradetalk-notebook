@@ -1,4 +1,4 @@
-import { createNotebookItem, getLatestIndexJobByItem, getNotebookItemByCompany, listNotebookItems, updateNotebookItemByOwner } from '../repos/notebookRepo.js';
+import { createNotebookItem, getLatestChunkSettingsByItem, getLatestIndexJobByItem, getNotebookItemByCompany, listNotebookItems, updateNotebookItemByOwner } from '../repos/notebookRepo.js';
 import { dbQuery } from '../db.js';
 import { enqueueNotebookIndexJob } from '../services/notebookIndexing.js';
 import { getCompanySettings, upsertInternalProfile } from '../repos/authRepo.js';
@@ -197,7 +197,10 @@ export async function createInternalCompanyKnowledgeItem(req, res) {
                 companyId,
                 ownerUserId: profileId,
                 itemId: item.id,
-                jobType: 'upsert'
+                jobType: 'upsert',
+                chunkStrategy: body.chunk_strategy || null,
+                chunkSize: body.chunk_size || null,
+                chunkSeparator: body.chunk_separator || null
             });
         }
         const indexJob = await getLatestIndexJobByItem(companyId, item.id);
@@ -289,11 +292,17 @@ export async function retryInternalCompanyKnowledgeIndex(req, res) {
         index_status: 'pending',
         index_error: null
     });
+    const latestChunk = item.is_indexable
+        ? await getLatestChunkSettingsByItem(companyId, itemId)
+        : null;
     await enqueueNotebookIndexJob({
         companyId,
         ownerUserId: item.owner_user_id,
         itemId,
-        jobType: item.is_indexable ? 'upsert' : 'delete'
+        jobType: item.is_indexable ? 'upsert' : 'delete',
+        chunkStrategy: latestChunk?.chunk_strategy || null,
+        chunkSize: latestChunk?.chunk_size || null,
+        chunkSeparator: latestChunk?.chunk_separator || null
     });
     const indexJob = await getLatestIndexJobByItem(companyId, itemId);
     return res.status(202).json({ ok: true, item_id: itemId, status: 'pending', index_job: indexJob || null });

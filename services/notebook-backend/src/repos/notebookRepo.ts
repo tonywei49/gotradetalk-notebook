@@ -496,6 +496,23 @@ export async function getLatestIndexJobByItem(companyId: string, itemId: string)
   return result.rows[0] || null
 }
 
+export async function getLatestChunkSettingsByItem(
+  companyId: string,
+  itemId: string
+): Promise<{ chunk_strategy: string | null; chunk_size: number | null; chunk_separator: string | null } | null> {
+  const result = await dbQuery<{ chunk_strategy: string | null; chunk_size: number | null; chunk_separator: string | null }>(
+    `select chunk_strategy, chunk_size, chunk_separator
+       from public.notebook_index_jobs
+      where company_id = $1
+        and item_id = $2
+        and (chunk_strategy is not null or chunk_size is not null or chunk_separator is not null)
+      order by created_at desc
+      limit 1`,
+    [companyId, itemId]
+  )
+  return result.rows[0] || null
+}
+
 export async function getIndexJobByOwner(jobId: string, companyId: string, ownerUserId: string): Promise<{ id: string; item_id: string } | null> {
   const result = await dbQuery<{ id: string; item_id: string }>(
     `select id::text as id, item_id::text as item_id
