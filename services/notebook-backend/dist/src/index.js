@@ -4,7 +4,7 @@ import cors from 'cors';
 import { requireHubUser } from './middleware/auth.js';
 import { assistFromContext, assistQuery, attachNotebookFile, createNotebookItem, createCompanyNotebookItem, deleteNotebookItemFile, deleteNotebookItem, deleteCompanyNotebookItem, getMeCapabilities, getNotebookItemChunks, getNotebookItemParsedPreview, getNotebookIndexStatus, listNotebookItemFiles, listNotebookItems, reindexNotebookItem, retryNotebookIndexJob, syncPull, syncPush, updateNotebookItem, updateCompanyNotebookItem } from './routes/notebook.js';
 import { getInternalNotebookAiSettings, upsertInternalNotebookAiSettings } from './routes/internalNotebookSettings.js';
-import { createInternalCompanyKnowledgeItem, deleteInternalCompanyKnowledgeItem, listInternalCompanyKnowledgeItems, offlineInternalCompanyKnowledgeItem, retryInternalCompanyKnowledgeIndex } from './routes/internalCompanyKnowledge.js';
+import { createInternalCompanyKnowledgeItem, deleteInternalCompanyKnowledgeItem, listInternalCompanyKnowledgeItems, offlineInternalCompanyKnowledgeItem, previewInternalCompanyKnowledgeItem, retryInternalCompanyKnowledgeIndex } from './routes/internalCompanyKnowledge.js';
 import { getCompanyNotebookAiSettings, getCompanyTranslationSettings, rejectManagedNotebookAiUpdate, rejectManagedTranslationUpdate } from './routes/companySettings.js';
 const app = express();
 const port = Number(process.env.PORT || 4010);
@@ -75,6 +75,7 @@ app.post('/internal/company/knowledge/items', createInternalCompanyKnowledgeItem
 app.delete('/internal/company/knowledge/items/:id', deleteInternalCompanyKnowledgeItem);
 app.post('/internal/company/knowledge/items/:id/offline', offlineInternalCompanyKnowledgeItem);
 app.post('/internal/company/knowledge/items/:id/retry-index', retryInternalCompanyKnowledgeIndex);
+app.get('/internal/company/knowledge/items/:id/preview', previewInternalCompanyKnowledgeItem);
 app.listen(port, () => {
     console.log(`Notebook backend listening on :${port}`);
 });

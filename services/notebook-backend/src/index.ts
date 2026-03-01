@@ -30,6 +30,7 @@ import {
   deleteInternalCompanyKnowledgeItem,
   listInternalCompanyKnowledgeItems,
   offlineInternalCompanyKnowledgeItem,
+  previewInternalCompanyKnowledgeItem,
   retryInternalCompanyKnowledgeIndex
 } from './routes/internalCompanyKnowledge.js'
 import {
@@ -113,6 +114,7 @@ app.post('/internal/company/knowledge/items', createInternalCompanyKnowledgeItem
 app.delete('/internal/company/knowledge/items/:id', deleteInternalCompanyKnowledgeItem)
 app.post('/internal/company/knowledge/items/:id/offline', offlineInternalCompanyKnowledgeItem)
 app.post('/internal/company/knowledge/items/:id/retry-index', retryInternalCompanyKnowledgeIndex)
+app.get('/internal/company/knowledge/items/:id/preview', previewInternalCompanyKnowledgeItem)
 
 app.listen(port, () => {
   console.log(`Notebook backend listening on :${port}`)

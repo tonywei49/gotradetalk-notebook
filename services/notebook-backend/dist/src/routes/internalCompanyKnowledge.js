@@ -1,4 +1,4 @@
-import { createNotebookItem, getLatestChunkSettingsByItem, getLatestIndexJobByItem, getNotebookItemByCompany, listNotebookItems, updateNotebookItemByOwner } from '../repos/notebookRepo.js';
+import { createNotebookItem, getNotebookChunkStatsByItem, getLatestChunkSettingsByItem, getLatestIndexJobByItem, getNotebookItemByCompany, listNotebookChunksByItem, listNotebookItems, updateNotebookItemByOwner } from '../repos/notebookRepo.js';
 import { dbQuery } from '../db.js';
 import { enqueueNotebookIndexJob } from '../services/notebookIndexing.js';
 import { getCompanySettings, upsertInternalProfile } from '../repos/authRepo.js';
@@ -306,4 +306,53 @@ export async function retryInternalCompanyKnowledgeIndex(req, res) {
     });
     const indexJob = await getLatestIndexJobByItem(companyId, itemId);
     return res.status(202).json({ ok: true, item_id: itemId, status: 'pending', index_job: indexJob || null });
+}
+export async function previewInternalCompanyKnowledgeItem(req, res) {
+    if (!authorized(req)) {
+        return res.status(401).json({ code: 'UNAUTHORIZED', message: 'Invalid internal secret' });
+    }
+    const companyId = resolveCompanyId(req);
+    const itemId = String(req.params.id || '').trim();
+    if (!companyId || !itemId) {
+        return res.status(400).json({ code: 'INVALID_INPUT', message: 'company_id and id are required' });
+    }
+    const item = await getNotebookItemByCompany(itemId, companyId);
+    if (!item || item.source_scope !== 'company') {
+        return res.status(404).json({ code: 'NOT_FOUND', message: 'Knowledge item not found' });
+    }
+    const previewLimit = Math.min(Math.max(Number(req.query.limit || 8), 1), 50);
+    const previewChars = Math.min(Math.max(Number(req.query.chars || 6000), 500), 40000);
+    const chunkLimit = Math.min(Math.max(Number(req.query.chunk_limit || 120), 1), 400);
+    const chunks = await listNotebookChunksByItem({
+        companyId,
+        ownerUserId: item.owner_user_id,
+        itemId,
+        limit: chunkLimit
+    });
+    const stats = await getNotebookChunkStatsByItem({
+        companyId,
+        ownerUserId: item.owner_user_id,
+        itemId
+    });
+    const parsedText = chunks
+        .slice(0, previewLimit)
+        .map((chunk) => String(chunk.chunk_text || '').trim())
+        .filter(Boolean)
+        .join('\n\n')
+        .slice(0, previewChars);
+    return res.json({
+        item_id: itemId,
+        index_status: item.index_status,
+        index_error: item.index_error || null,
+        preview: {
+            text: parsedText,
+            truncated: parsedText.length >= previewChars,
+            chunk_count_sampled: Math.min(chunks.length, previewLimit),
+            chunk_count_total: Number(stats.chunk_count || 0),
+            total_chars: Number(stats.total_chars || 0),
+            total_tokens: Number(stats.total_tokens || 0)
+        },
+        chunks,
+        total: Number(stats.chunk_count || 0)
+    });
 }
