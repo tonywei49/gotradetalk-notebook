@@ -30,6 +30,7 @@ test('integration: xlsx parse -> chunk', async () => {
   assert.equal(parsed.sourceType, 'xlsx')
   assert.match(parsed.text, /## Sheet: Specs/i)
   assert.match(parsed.text, /\| sku \| feature \|/i)
+  assert.match(parsed.text, /row_2: sku=P001; feature=voice call/i)
   assert.match(parsed.sourceLocator || '', /sheet:Specs row:1-3/)
   assert.equal(parsed.segments?.length, 1)
   assert.match(parsed.segments?.[0]?.sourceLocator || '', /sheet:Specs row:1-3/)
@@ -92,4 +93,5 @@ test('integration: xlsx cleanup preserves original row locators after repeated e
   )
   assert.equal(parsed.text.includes('生产指令单'), false)
   assert.equal(parsed.text.includes('备注：内部使用'), false)
+  assert.match(parsed.text, /row_2: 订单号=sku; TW001=A1/i)
 })

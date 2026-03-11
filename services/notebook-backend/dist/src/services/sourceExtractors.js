@@ -5,7 +5,7 @@ function buildInlineTextSource(item) {
     const text = `${item.title || ''}\n${item.content_markdown || ''}`.trim();
     if (!text)
         return null;
-    return { text, sourceType: 'text', sourceLocator: null };
+    return { text, sourceType: 'text', sourceLocator: null, segments: undefined };
 }
 function isImageSource(mime, fileName) {
     const normalizedMime = String(mime || '').toLowerCase();
@@ -64,14 +64,16 @@ async function extractSingleFileSource(params) {
         return {
             text: combinedText || ocrResult.text,
             sourceType: 'image_ocr',
-            sourceLocator: file.matrix_media_name || file.matrix_media_mxc
+            sourceLocator: file.matrix_media_name || file.matrix_media_mxc,
+            segments: undefined
         };
     }
     const parsed = await parseDocument(media, file.matrix_media_mime, file.matrix_media_name);
     return {
         text: parsed.text,
         sourceType: parsed.sourceType,
-        sourceLocator: parsed.sourceLocator || file.matrix_media_name || file.matrix_media_mxc
+        sourceLocator: parsed.sourceLocator || file.matrix_media_name || file.matrix_media_mxc,
+        segments: parsed.segments
     };
 }
 export async function extractItemSources(params) {

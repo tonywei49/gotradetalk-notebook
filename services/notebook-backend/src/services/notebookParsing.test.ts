@@ -126,3 +126,15 @@ test('docx segments split by headings and keep section locator', () => {
   assert.equal(segments[1]?.sourceLocator, 'section:Specs')
   assert.ok(segments[1]?.text.includes('Detail line 2'))
 })
+
+test('xlsx row expansion falls back to generic column names when first row is weak header', () => {
+  const rows = [
+    ['生产指令单'],
+    ['订单号', 'TW001'],
+    ['sku', 'A1']
+  ]
+
+  const text = __notebookParsingTestables.rowsToExpandedKeyValueText(rows)
+  assert.match(text, /row_2: col_1=订单号; col_2=TW001/)
+  assert.match(text, /row_3: col_1=sku; col_2=A1/)
+})

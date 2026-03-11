@@ -32,7 +32,7 @@ function isBlankRow(row: Array<unknown>) {
 }
 
 function countNonBlankCells(row: Array<unknown>) {
-  return row.reduce((count, cell) => count + (isBlankCell(cell) ? 0 : 1), 0)
+  return row.reduce<number>((count, cell) => count + (isBlankCell(cell) ? 0 : 1), 0)
 }
 
 function normalizeBoilerplateKey(text: string) {
@@ -196,11 +196,11 @@ function removeRepeatedWorkbookEdgeRows(sheetRowsList: SheetRow[][]) {
   for (const rows of sheetRowsList) {
     const topRows = rows.filter((row) => !isBlankRow(row.cells)).slice(0, edgeDepth)
     const bottomRows = rows.filter((row) => !isBlankRow(row.cells)).slice(-edgeDepth)
-    const topKeys = new Set(topRows
+    const topKeys = new Set<string>(topRows
       .filter((row) => countNonBlankCells(row.cells) <= 2)
       .map((row) => normalizeExactBoilerplateKey(toSparseRowText(row.cells)))
       .filter((key) => key.length > 0 && key.length <= 120))
-    const bottomKeys = new Set(bottomRows
+    const bottomKeys = new Set<string>(bottomRows
       .filter((row) => countNonBlankCells(row.cells) <= 2)
       .map((row) => normalizeExactBoilerplateKey(toSparseRowText(row.cells)))
       .filter((key) => key.length > 0 && key.length <= 120))
@@ -264,15 +264,51 @@ function toSheetRowBlocks(rows: SheetRow[]) {
 }
 
 function buildSheetBlockText(sheetName: string, block: { rows: Array<Array<unknown>> }) {
+  const tableText = rowsToMarkdownTable(block.rows) || '(empty sheet)'
+  const rowExpansion = rowsToExpandedKeyValueText(block.rows)
   return normalizeExtractedText([
     `## Sheet: ${sheetName}`,
     '',
-    rowsToMarkdownTable(block.rows) || '(empty sheet)'
+    tableText,
+    rowExpansion ? `\n### Row Summary\n\n${rowExpansion}` : ''
   ].join('\n'))
 }
 
 function toSheetLocator(sheetName: string, startRow: number, endRow: number) {
   return `sheet:${sheetName} row:${startRow}-${endRow}`
+}
+
+function inferHeaderRow(rows: Array<Array<unknown>>) {
+  if (rows.length === 0) return [] as string[]
+  const firstRow = rows[0] || []
+  const normalized = firstRow.map((cell, index) => escapeMarkdownCell(cell) || `col_${index + 1}`)
+  const uniqueValues = new Set(normalized.filter(Boolean))
+  const nonBlankCount = normalized.filter(Boolean).length
+  const looksLikeHeader = nonBlankCount >= 2 && uniqueValues.size >= Math.max(2, Math.floor(nonBlankCount * 0.6))
+  if (looksLikeHeader) return normalized
+  return normalized.map((_, index) => `col_${index + 1}`)
+}
+
+function rowsToExpandedKeyValueText(rows: Array<Array<unknown>>) {
+  if (rows.length <= 1) return ''
+  const headerRow = inferHeaderRow(rows)
+  const bodyRows = rows.slice(1)
+  const lines: string[] = []
+
+  bodyRows.forEach((row, rowIndex) => {
+    const entries: string[] = []
+    for (let index = 0; index < Math.max(headerRow.length, row.length); index += 1) {
+      const key = escapeMarkdownCell(headerRow[index] || `col_${index + 1}`)
+      const value = escapeMarkdownCell(row[index] || '')
+      if (!key || !value) continue
+      entries.push(`${key}=${value}`)
+    }
+    if (entries.length > 0) {
+      lines.push(`row_${rowIndex + 2}: ${entries.join('; ')}`)
+    }
+  })
+
+  return lines.join('\n')
 }
 
 function splitPdfPages(rawText: string) {
@@ -346,7 +382,8 @@ export const __notebookParsingTestables = {
   removeRepeatedWorkbookEdgeRows,
   toSheetRows,
   removeRepeatedDocxBoilerplateBlocks,
-  buildDocxSegments
+  buildDocxSegments,
+  rowsToExpandedKeyValueText
 }
 
 function normalizeMime(mime: string | null | undefined, fileName: string | null | undefined) {

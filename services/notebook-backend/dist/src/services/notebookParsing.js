@@ -6,6 +6,31 @@ import { parse as parseCsv } from 'csv-parse/sync';
 function escapeMarkdownCell(value) {
     return String(value ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim();
 }
+function isBlankCell(value) {
+    return escapeMarkdownCell(value) === '';
+}
+function isBlankRow(row) {
+    return row.length === 0 || row.every((cell) => isBlankCell(cell));
+}
+function countNonBlankCells(row) {
+    return row.reduce((count, cell) => count + (isBlankCell(cell) ? 0 : 1), 0);
+}
+function normalizeBoilerplateKey(text) {
+    return text
+        .toLowerCase()
+        .replace(/\d+/g, '#')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+function normalizeExactBoilerplateKey(text) {
+    return text
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+function toSparseRowText(row) {
+    return row.map((cell) => escapeMarkdownCell(cell)).filter(Boolean).join(' | ');
+}
 function rowsToMarkdownTable(rows) {
     if (rows.length === 0)
         return '';
@@ -33,6 +58,217 @@ function normalizeExtractedText(text) {
         .replace(/\r\n/g, '\n')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
+}
+function splitDocxBlocks(text) {
+    return normalizeExtractedText(text)
+        .split(/\n{2,}/g)
+        .map((block) => block.trim())
+        .filter(Boolean);
+}
+function isMarkdownTableBlock(block) {
+    return block.includes('\n| ') || /^\| .+ \|$/m.test(block);
+}
+function isShortBoilerplateBlock(block) {
+    const compact = block.replace(/\s+/g, ' ').trim();
+    if (!compact || compact.length > 80)
+        return false;
+    if (/^#{1,6}\s+/.test(compact))
+        return false;
+    if (isMarkdownTableBlock(compact))
+        return false;
+    return compact.split(' ').length <= 8;
+}
+function removeRepeatedDocxBoilerplateBlocks(text) {
+    const blocks = splitDocxBlocks(text);
+    if (blocks.length < 4)
+        return normalizeExtractedText(text);
+    const counts = new Map();
+    for (const block of blocks) {
+        if (!isShortBoilerplateBlock(block))
+            continue;
+        const key = normalizeBoilerplateKey(block);
+        counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    const repeated = new Set(Array.from(counts.entries())
+        .filter(([, count]) => count >= 3)
+        .map(([key]) => key));
+    if (repeated.size === 0)
+        return normalizeExtractedText(text);
+    return normalizeExtractedText(blocks
+        .filter((block) => !repeated.has(normalizeBoilerplateKey(block)))
+        .join('\n\n'));
+}
+function toDocxSectionLocator(title, index) {
+    const cleaned = title.replace(/^#{1,6}\s+/, '').replace(/\s+/g, ' ').trim();
+    return cleaned ? `section:${cleaned}` : `section:${index}`;
+}
+function buildDocxSegments(text) {
+    const blocks = splitDocxBlocks(text);
+    if (blocks.length === 0)
+        return [];
+    const segments = [];
+    let currentBlocks = [];
+    let currentTitle = '';
+    const flush = () => {
+        if (currentBlocks.length === 0)
+            return;
+        segments.push({
+            text: normalizeExtractedText(currentBlocks.join('\n\n')),
+            sourceLocator: toDocxSectionLocator(currentTitle, segments.length + 1)
+        });
+        currentBlocks = [];
+        currentTitle = '';
+    };
+    for (const block of blocks) {
+        const isHeading = /^#{1,6}\s+/.test(block);
+        if (isHeading) {
+            flush();
+            currentTitle = block;
+            currentBlocks = [block];
+            continue;
+        }
+        if (currentBlocks.length === 0) {
+            currentBlocks = [block];
+            continue;
+        }
+        const nextText = `${currentBlocks.join('\n\n')}\n\n${block}`;
+        if (nextText.length > 1400 && currentBlocks.length > 0) {
+            flush();
+        }
+        if (currentBlocks.length === 0) {
+            currentBlocks = [block];
+        }
+        else {
+            currentBlocks.push(block);
+        }
+    }
+    flush();
+    return segments;
+}
+function toSheetRows(rows) {
+    return rows.map((cells, index) => ({
+        rowNumber: index + 1,
+        cells: cells || []
+    }));
+}
+function removeRepeatedWorkbookEdgeRows(sheetRowsList) {
+    if (sheetRowsList.length < 2)
+        return sheetRowsList;
+    const edgeDepth = 4;
+    const threshold = Math.max(2, Math.ceil(sheetRowsList.length * 0.6));
+    const topCounts = new Map();
+    const bottomCounts = new Map();
+    for (const rows of sheetRowsList) {
+        const topRows = rows.filter((row) => !isBlankRow(row.cells)).slice(0, edgeDepth);
+        const bottomRows = rows.filter((row) => !isBlankRow(row.cells)).slice(-edgeDepth);
+        const topKeys = new Set(topRows
+            .filter((row) => countNonBlankCells(row.cells) <= 2)
+            .map((row) => normalizeExactBoilerplateKey(toSparseRowText(row.cells)))
+            .filter((key) => key.length > 0 && key.length <= 120));
+        const bottomKeys = new Set(bottomRows
+            .filter((row) => countNonBlankCells(row.cells) <= 2)
+            .map((row) => normalizeExactBoilerplateKey(toSparseRowText(row.cells)))
+            .filter((key) => key.length > 0 && key.length <= 120));
+        for (const key of topKeys)
+            topCounts.set(key, (topCounts.get(key) || 0) + 1);
+        for (const key of bottomKeys)
+            bottomCounts.set(key, (bottomCounts.get(key) || 0) + 1);
+    }
+    const repeatedTop = new Set(Array.from(topCounts.entries()).filter(([, count]) => count >= threshold).map(([key]) => key));
+    const repeatedBottom = new Set(Array.from(bottomCounts.entries()).filter(([, count]) => count >= threshold).map(([key]) => key));
+    return sheetRowsList.map((rows) => {
+        const nonBlankRows = rows.filter((row) => !isBlankRow(row.cells));
+        const topWindow = new Set(nonBlankRows.slice(0, edgeDepth).map((row) => row.rowNumber));
+        const bottomWindow = new Set(nonBlankRows.slice(-edgeDepth).map((row) => row.rowNumber));
+        return rows.filter((row) => {
+            if (isBlankRow(row.cells))
+                return true;
+            const key = normalizeExactBoilerplateKey(toSparseRowText(row.cells));
+            if (topWindow.has(row.rowNumber) && repeatedTop.has(key))
+                return false;
+            if (bottomWindow.has(row.rowNumber) && repeatedBottom.has(key))
+                return false;
+            return true;
+        });
+    });
+}
+function toSheetRowBlocks(rows) {
+    const blocks = [];
+    let current = [];
+    let startRow = 0;
+    let endRow = 0;
+    for (const row of rows) {
+        if (isBlankRow(row.cells)) {
+            if (current.length > 0) {
+                blocks.push({
+                    startRow,
+                    endRow,
+                    rows: current
+                });
+                current = [];
+            }
+            continue;
+        }
+        if (current.length === 0) {
+            startRow = row.rowNumber;
+        }
+        current.push(row.cells);
+        endRow = row.rowNumber;
+    }
+    if (current.length > 0) {
+        blocks.push({
+            startRow,
+            endRow,
+            rows: current
+        });
+    }
+    return blocks;
+}
+function buildSheetBlockText(sheetName, block) {
+    const tableText = rowsToMarkdownTable(block.rows) || '(empty sheet)';
+    const rowExpansion = rowsToExpandedKeyValueText(block.rows);
+    return normalizeExtractedText([
+        `## Sheet: ${sheetName}`,
+        '',
+        tableText,
+        rowExpansion ? `\n### Row Summary\n\n${rowExpansion}` : ''
+    ].join('\n'));
+}
+function toSheetLocator(sheetName, startRow, endRow) {
+    return `sheet:${sheetName} row:${startRow}-${endRow}`;
+}
+function inferHeaderRow(rows) {
+    if (rows.length === 0)
+        return [];
+    const firstRow = rows[0] || [];
+    const normalized = firstRow.map((cell, index) => escapeMarkdownCell(cell) || `col_${index + 1}`);
+    const uniqueValues = new Set(normalized.filter(Boolean));
+    const nonBlankCount = normalized.filter(Boolean).length;
+    const looksLikeHeader = nonBlankCount >= 2 && uniqueValues.size >= Math.max(2, Math.floor(nonBlankCount * 0.6));
+    if (looksLikeHeader)
+        return normalized;
+    return normalized.map((_, index) => `col_${index + 1}`);
+}
+function rowsToExpandedKeyValueText(rows) {
+    if (rows.length <= 1)
+        return '';
+    const headerRow = inferHeaderRow(rows);
+    const bodyRows = rows.slice(1);
+    const lines = [];
+    bodyRows.forEach((row, rowIndex) => {
+        const entries = [];
+        for (let index = 0; index < Math.max(headerRow.length, row.length); index += 1) {
+            const key = escapeMarkdownCell(headerRow[index] || `col_${index + 1}`);
+            const value = escapeMarkdownCell(row[index] || '');
+            if (!key || !value)
+                continue;
+            entries.push(`${key}=${value}`);
+        }
+        if (entries.length > 0) {
+            lines.push(`row_${rowIndex + 2}: ${entries.join('; ')}`);
+        }
+    });
+    return lines.join('\n');
 }
 function splitPdfPages(rawText) {
     const normalized = rawText.replace(/\r\n/g, '\n');
@@ -63,10 +299,14 @@ function removeRepeatedPdfHeaderFooter(pages) {
     for (const lines of pageLines) {
         const topUnique = new Set(lines.slice(0, 3));
         const bottomUnique = new Set(lines.slice(-3));
-        for (const line of topUnique)
-            topCounts.set(line, (topCounts.get(line) || 0) + 1);
-        for (const line of bottomUnique)
-            bottomCounts.set(line, (bottomCounts.get(line) || 0) + 1);
+        for (const line of topUnique) {
+            const key = normalizeBoilerplateKey(line);
+            topCounts.set(key, (topCounts.get(key) || 0) + 1);
+        }
+        for (const line of bottomUnique) {
+            const key = normalizeBoilerplateKey(line);
+            bottomCounts.set(key, (bottomCounts.get(key) || 0) + 1);
+        }
     }
     const repeatedTop = new Set(Array.from(topCounts.entries())
         .filter(([line, count]) => count >= threshold && line.length <= 120)
@@ -79,8 +319,8 @@ function removeRepeatedPdfHeaderFooter(pages) {
         const endWindow = new Set(lines.slice(-3));
         return lines
             .filter((line) => !looksLikePageNumberLine(line))
-            .filter((line) => !(startWindow.has(line) && repeatedTop.has(line)))
-            .filter((line) => !(endWindow.has(line) && repeatedBottom.has(line)))
+            .filter((line) => !(startWindow.has(line) && repeatedTop.has(normalizeBoilerplateKey(line))))
+            .filter((line) => !(endWindow.has(line) && repeatedBottom.has(normalizeBoilerplateKey(line))))
             .join('\n')
             .trim();
     }).filter(Boolean);
@@ -93,7 +333,12 @@ function formatPdfAsMarkdown(pages) {
 export const __notebookParsingTestables = {
     splitPdfPages,
     removeRepeatedPdfHeaderFooter,
-    looksLikePageNumberLine
+    looksLikePageNumberLine,
+    removeRepeatedWorkbookEdgeRows,
+    toSheetRows,
+    removeRepeatedDocxBoilerplateBlocks,
+    buildDocxSegments,
+    rowsToExpandedKeyValueText
 };
 function normalizeMime(mime, fileName) {
     const m = String(mime || '').toLowerCase();
@@ -200,10 +445,24 @@ export async function parseDocument(buffer, matrixMediaMime, matrixMediaName) {
             markdownValue = String(markdown?.value || '');
         }
         if (markdownValue.trim()) {
-            return { text: normalizeExtractedText(markdownValue), sourceType: 'docx' };
+            const cleanedText = removeRepeatedDocxBoilerplateBlocks(markdownValue);
+            const segments = buildDocxSegments(cleanedText);
+            return {
+                text: cleanedText,
+                sourceType: 'docx',
+                sourceLocator: segments[0]?.sourceLocator,
+                segments
+            };
         }
         const data = await mammoth.extractRawText({ buffer });
-        return { text: normalizeExtractedText(data.value || ''), sourceType: 'docx' };
+        const cleanedText = removeRepeatedDocxBoilerplateBlocks(String(data.value || ''));
+        const segments = buildDocxSegments(cleanedText);
+        return {
+            text: cleanedText,
+            sourceType: 'docx',
+            sourceLocator: segments[0]?.sourceLocator,
+            segments
+        };
     }
     if (type === 'csv') {
         const rows = parseCsv(buffer.toString('utf8'), { skip_empty_lines: true });
@@ -218,23 +477,49 @@ export async function parseDocument(buffer, matrixMediaMime, matrixMediaName) {
     if (type === 'xlsx') {
         const workbook = XLSX.read(buffer, { type: 'buffer' });
         const lines = [];
+        const segments = [];
         let firstLocator = '';
-        workbook.SheetNames.forEach((sheetName) => {
+        const workbookSheets = workbook.SheetNames.map((sheetName) => {
             const ws = workbook.Sheets[sheetName];
             const json = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
-            const table = rowsToMarkdownTable(json);
-            lines.push(`## Sheet: ${sheetName}`);
-            lines.push('');
-            lines.push(table || '(empty sheet)');
-            lines.push('');
-            if (!firstLocator && json.length > 0) {
-                firstLocator = `${sheetName}:R1-R${json.length}`;
+            return {
+                sheetName,
+                rawRows: json,
+                sheetRows: toSheetRows(json)
+            };
+        });
+        const cleanedSheetRowsList = removeRepeatedWorkbookEdgeRows(workbookSheets.map((sheet) => sheet.sheetRows));
+        workbookSheets.forEach((sheet, sheetIndex) => {
+            const sheetBlocks = toSheetRowBlocks(cleanedSheetRowsList[sheetIndex] || sheet.sheetRows);
+            const locator = toSheetLocator(sheet.sheetName, 1, Math.max(sheet.rawRows.length, 1));
+            if (sheetBlocks.length === 0) {
+                const emptyText = normalizeExtractedText([
+                    `## Sheet: ${sheet.sheetName}`,
+                    '',
+                    '(empty sheet)'
+                ].join('\n'));
+                lines.push(emptyText);
+                lines.push('');
+                segments.push({ text: emptyText, sourceLocator: locator });
+            }
+            else {
+                sheetBlocks.forEach((block) => {
+                    const blockText = buildSheetBlockText(sheet.sheetName, block);
+                    const blockLocator = toSheetLocator(sheet.sheetName, block.startRow, block.endRow);
+                    lines.push(blockText);
+                    lines.push('');
+                    segments.push({ text: blockText, sourceLocator: blockLocator });
+                });
+            }
+            if (!firstLocator && sheet.rawRows.length > 0) {
+                firstLocator = locator;
             }
         });
         return {
             text: normalizeExtractedText(lines.join('\n')),
             sourceType: 'xlsx',
-            sourceLocator: firstLocator || undefined
+            sourceLocator: firstLocator || undefined,
+            segments
         };
     }
     throw new Error('UNSUPPORTED_FILE_TYPE');
