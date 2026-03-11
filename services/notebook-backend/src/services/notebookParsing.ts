@@ -8,10 +8,50 @@ export type ParsedDocument = {
   text: string
   sourceType: string
   sourceLocator?: string
+  segments?: Array<{
+    text: string
+    sourceLocator?: string
+  }>
+}
+
+type SheetRow = {
+  rowNumber: number
+  cells: Array<unknown>
 }
 
 function escapeMarkdownCell(value: unknown) {
   return String(value ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim()
+}
+
+function isBlankCell(value: unknown) {
+  return escapeMarkdownCell(value) === ''
+}
+
+function isBlankRow(row: Array<unknown>) {
+  return row.length === 0 || row.every((cell) => isBlankCell(cell))
+}
+
+function countNonBlankCells(row: Array<unknown>) {
+  return row.reduce((count, cell) => count + (isBlankCell(cell) ? 0 : 1), 0)
+}
+
+function normalizeBoilerplateKey(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/\d+/g, '#')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeExactBoilerplateKey(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function toSparseRowText(row: Array<unknown>) {
+  return row.map((cell) => escapeMarkdownCell(cell)).filter(Boolean).join(' | ')
 }
 
 function rowsToMarkdownTable(rows: Array<Array<unknown>>) {
@@ -44,6 +84,197 @@ function normalizeExtractedText(text: string) {
     .trim()
 }
 
+function splitDocxBlocks(text: string) {
+  return normalizeExtractedText(text)
+    .split(/\n{2,}/g)
+    .map((block) => block.trim())
+    .filter(Boolean)
+}
+
+function isMarkdownTableBlock(block: string) {
+  return block.includes('\n| ') || /^\| .+ \|$/m.test(block)
+}
+
+function isShortBoilerplateBlock(block: string) {
+  const compact = block.replace(/\s+/g, ' ').trim()
+  if (!compact || compact.length > 80) return false
+  if (/^#{1,6}\s+/.test(compact)) return false
+  if (isMarkdownTableBlock(compact)) return false
+  return compact.split(' ').length <= 8
+}
+
+function removeRepeatedDocxBoilerplateBlocks(text: string) {
+  const blocks = splitDocxBlocks(text)
+  if (blocks.length < 4) return normalizeExtractedText(text)
+
+  const counts = new Map<string, number>()
+  for (const block of blocks) {
+    if (!isShortBoilerplateBlock(block)) continue
+    const key = normalizeBoilerplateKey(block)
+    counts.set(key, (counts.get(key) || 0) + 1)
+  }
+
+  const repeated = new Set(Array.from(counts.entries())
+    .filter(([, count]) => count >= 3)
+    .map(([key]) => key))
+
+  if (repeated.size === 0) return normalizeExtractedText(text)
+
+  return normalizeExtractedText(blocks
+    .filter((block) => !repeated.has(normalizeBoilerplateKey(block)))
+    .join('\n\n'))
+}
+
+function toDocxSectionLocator(title: string, index: number) {
+  const cleaned = title.replace(/^#{1,6}\s+/, '').replace(/\s+/g, ' ').trim()
+  return cleaned ? `section:${cleaned}` : `section:${index}`
+}
+
+function buildDocxSegments(text: string) {
+  const blocks = splitDocxBlocks(text)
+  if (blocks.length === 0) return [] as Array<{ text: string; sourceLocator?: string }>
+
+  const segments: Array<{ text: string; sourceLocator?: string }> = []
+  let currentBlocks: string[] = []
+  let currentTitle = ''
+
+  const flush = () => {
+    if (currentBlocks.length === 0) return
+    segments.push({
+      text: normalizeExtractedText(currentBlocks.join('\n\n')),
+      sourceLocator: toDocxSectionLocator(currentTitle, segments.length + 1)
+    })
+    currentBlocks = []
+    currentTitle = ''
+  }
+
+  for (const block of blocks) {
+    const isHeading = /^#{1,6}\s+/.test(block)
+    if (isHeading) {
+      flush()
+      currentTitle = block
+      currentBlocks = [block]
+      continue
+    }
+
+    if (currentBlocks.length === 0) {
+      currentBlocks = [block]
+      continue
+    }
+
+    const nextText = `${currentBlocks.join('\n\n')}\n\n${block}`
+    if (nextText.length > 1400 && currentBlocks.length > 0) {
+      flush()
+    }
+
+    if (currentBlocks.length === 0) {
+      currentBlocks = [block]
+    } else {
+      currentBlocks.push(block)
+    }
+  }
+
+  flush()
+  return segments
+}
+
+function toSheetRows(rows: Array<Array<unknown>>) {
+  return rows.map((cells, index) => ({
+    rowNumber: index + 1,
+    cells: cells || []
+  }))
+}
+
+function removeRepeatedWorkbookEdgeRows(sheetRowsList: SheetRow[][]) {
+  if (sheetRowsList.length < 2) return sheetRowsList
+
+  const edgeDepth = 4
+  const threshold = Math.max(2, Math.ceil(sheetRowsList.length * 0.6))
+  const topCounts = new Map<string, number>()
+  const bottomCounts = new Map<string, number>()
+
+  for (const rows of sheetRowsList) {
+    const topRows = rows.filter((row) => !isBlankRow(row.cells)).slice(0, edgeDepth)
+    const bottomRows = rows.filter((row) => !isBlankRow(row.cells)).slice(-edgeDepth)
+    const topKeys = new Set(topRows
+      .filter((row) => countNonBlankCells(row.cells) <= 2)
+      .map((row) => normalizeExactBoilerplateKey(toSparseRowText(row.cells)))
+      .filter((key) => key.length > 0 && key.length <= 120))
+    const bottomKeys = new Set(bottomRows
+      .filter((row) => countNonBlankCells(row.cells) <= 2)
+      .map((row) => normalizeExactBoilerplateKey(toSparseRowText(row.cells)))
+      .filter((key) => key.length > 0 && key.length <= 120))
+
+    for (const key of topKeys) topCounts.set(key, (topCounts.get(key) || 0) + 1)
+    for (const key of bottomKeys) bottomCounts.set(key, (bottomCounts.get(key) || 0) + 1)
+  }
+
+  const repeatedTop = new Set(Array.from(topCounts.entries()).filter(([, count]) => count >= threshold).map(([key]) => key))
+  const repeatedBottom = new Set(Array.from(bottomCounts.entries()).filter(([, count]) => count >= threshold).map(([key]) => key))
+
+  return sheetRowsList.map((rows) => {
+    const nonBlankRows = rows.filter((row) => !isBlankRow(row.cells))
+    const topWindow = new Set(nonBlankRows.slice(0, edgeDepth).map((row) => row.rowNumber))
+    const bottomWindow = new Set(nonBlankRows.slice(-edgeDepth).map((row) => row.rowNumber))
+    return rows.filter((row) => {
+      if (isBlankRow(row.cells)) return true
+      const key = normalizeExactBoilerplateKey(toSparseRowText(row.cells))
+      if (topWindow.has(row.rowNumber) && repeatedTop.has(key)) return false
+      if (bottomWindow.has(row.rowNumber) && repeatedBottom.has(key)) return false
+      return true
+    })
+  })
+}
+
+function toSheetRowBlocks(rows: SheetRow[]) {
+  const blocks: Array<{ startRow: number; endRow: number; rows: Array<Array<unknown>> }> = []
+  let current: Array<Array<unknown>> = []
+  let startRow = 0
+  let endRow = 0
+
+  for (const row of rows) {
+    if (isBlankRow(row.cells)) {
+      if (current.length > 0) {
+        blocks.push({
+          startRow,
+          endRow,
+          rows: current
+        })
+        current = []
+      }
+      continue
+    }
+
+    if (current.length === 0) {
+      startRow = row.rowNumber
+    }
+    current.push(row.cells)
+    endRow = row.rowNumber
+  }
+
+  if (current.length > 0) {
+    blocks.push({
+      startRow,
+      endRow,
+      rows: current
+    })
+  }
+
+  return blocks
+}
+
+function buildSheetBlockText(sheetName: string, block: { rows: Array<Array<unknown>> }) {
+  return normalizeExtractedText([
+    `## Sheet: ${sheetName}`,
+    '',
+    rowsToMarkdownTable(block.rows) || '(empty sheet)'
+  ].join('\n'))
+}
+
+function toSheetLocator(sheetName: string, startRow: number, endRow: number) {
+  return `sheet:${sheetName} row:${startRow}-${endRow}`
+}
+
 function splitPdfPages(rawText: string) {
   const normalized = rawText.replace(/\r\n/g, '\n')
   const pages = normalized.split(/\f+/g).map((page) => page.trim()).filter(Boolean)
@@ -73,8 +304,14 @@ function removeRepeatedPdfHeaderFooter(pages: string[]) {
     const topUnique = new Set(lines.slice(0, 3))
     const bottomUnique = new Set(lines.slice(-3))
 
-    for (const line of topUnique) topCounts.set(line, (topCounts.get(line) || 0) + 1)
-    for (const line of bottomUnique) bottomCounts.set(line, (bottomCounts.get(line) || 0) + 1)
+    for (const line of topUnique) {
+      const key = normalizeBoilerplateKey(line)
+      topCounts.set(key, (topCounts.get(key) || 0) + 1)
+    }
+    for (const line of bottomUnique) {
+      const key = normalizeBoilerplateKey(line)
+      bottomCounts.set(key, (bottomCounts.get(key) || 0) + 1)
+    }
   }
 
   const repeatedTop = new Set(Array.from(topCounts.entries())
@@ -89,8 +326,8 @@ function removeRepeatedPdfHeaderFooter(pages: string[]) {
     const endWindow = new Set(lines.slice(-3))
     return lines
       .filter((line) => !looksLikePageNumberLine(line))
-      .filter((line) => !(startWindow.has(line) && repeatedTop.has(line)))
-      .filter((line) => !(endWindow.has(line) && repeatedBottom.has(line)))
+      .filter((line) => !(startWindow.has(line) && repeatedTop.has(normalizeBoilerplateKey(line))))
+      .filter((line) => !(endWindow.has(line) && repeatedBottom.has(normalizeBoilerplateKey(line))))
       .join('\n')
       .trim()
   }).filter(Boolean)
@@ -105,7 +342,11 @@ function formatPdfAsMarkdown(pages: string[]) {
 export const __notebookParsingTestables = {
   splitPdfPages,
   removeRepeatedPdfHeaderFooter,
-  looksLikePageNumberLine
+  looksLikePageNumberLine,
+  removeRepeatedWorkbookEdgeRows,
+  toSheetRows,
+  removeRepeatedDocxBoilerplateBlocks,
+  buildDocxSegments
 }
 
 function normalizeMime(mime: string | null | undefined, fileName: string | null | undefined) {
@@ -220,11 +461,25 @@ export async function parseDocument(buffer: Buffer, matrixMediaMime?: string | n
     }
 
     if (markdownValue.trim()) {
-      return { text: normalizeExtractedText(markdownValue), sourceType: 'docx' }
+      const cleanedText = removeRepeatedDocxBoilerplateBlocks(markdownValue)
+      const segments = buildDocxSegments(cleanedText)
+      return {
+        text: cleanedText,
+        sourceType: 'docx',
+        sourceLocator: segments[0]?.sourceLocator,
+        segments
+      }
     }
 
     const data = await mammoth.extractRawText({ buffer })
-    return { text: normalizeExtractedText(data.value || ''), sourceType: 'docx' }
+    const cleanedText = removeRepeatedDocxBoilerplateBlocks(String(data.value || ''))
+    const segments = buildDocxSegments(cleanedText)
+    return {
+      text: cleanedText,
+      sourceType: 'docx',
+      sourceLocator: segments[0]?.sourceLocator,
+      segments
+    }
   }
 
   if (type === 'csv') {
@@ -241,25 +496,54 @@ export async function parseDocument(buffer: Buffer, matrixMediaMime?: string | n
   if (type === 'xlsx') {
     const workbook = XLSX.read(buffer, { type: 'buffer' })
     const lines: string[] = []
+    const segments: Array<{ text: string; sourceLocator?: string }> = []
     let firstLocator = ''
 
-    workbook.SheetNames.forEach((sheetName) => {
+    const workbookSheets = workbook.SheetNames.map((sheetName) => {
       const ws = workbook.Sheets[sheetName]
       const json = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false }) as Array<Array<string | number | boolean | null>>
-      const table = rowsToMarkdownTable(json)
-      lines.push(`## Sheet: ${sheetName}`)
-      lines.push('')
-      lines.push(table || '(empty sheet)')
-      lines.push('')
-      if (!firstLocator && json.length > 0) {
-        firstLocator = `${sheetName}:R1-R${json.length}`
+      return {
+        sheetName,
+        rawRows: json,
+        sheetRows: toSheetRows(json)
+      }
+    })
+
+    const cleanedSheetRowsList = removeRepeatedWorkbookEdgeRows(workbookSheets.map((sheet) => sheet.sheetRows))
+
+    workbookSheets.forEach((sheet, sheetIndex) => {
+      const sheetBlocks = toSheetRowBlocks(cleanedSheetRowsList[sheetIndex] || sheet.sheetRows)
+      const locator = toSheetLocator(sheet.sheetName, 1, Math.max(sheet.rawRows.length, 1))
+
+      if (sheetBlocks.length === 0) {
+        const emptyText = normalizeExtractedText([
+          `## Sheet: ${sheet.sheetName}`,
+          '',
+          '(empty sheet)'
+        ].join('\n'))
+        lines.push(emptyText)
+        lines.push('')
+        segments.push({ text: emptyText, sourceLocator: locator })
+      } else {
+        sheetBlocks.forEach((block) => {
+          const blockText = buildSheetBlockText(sheet.sheetName, block)
+          const blockLocator = toSheetLocator(sheet.sheetName, block.startRow, block.endRow)
+          lines.push(blockText)
+          lines.push('')
+          segments.push({ text: blockText, sourceLocator: blockLocator })
+        })
+      }
+
+      if (!firstLocator && sheet.rawRows.length > 0) {
+        firstLocator = locator
       }
     })
 
     return {
       text: normalizeExtractedText(lines.join('\n')),
       sourceType: 'xlsx',
-      sourceLocator: firstLocator || undefined
+      sourceLocator: firstLocator || undefined,
+      segments
     }
   }
 

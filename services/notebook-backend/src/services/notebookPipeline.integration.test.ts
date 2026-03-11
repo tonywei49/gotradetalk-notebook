@@ -30,8 +30,66 @@ test('integration: xlsx parse -> chunk', async () => {
   assert.equal(parsed.sourceType, 'xlsx')
   assert.match(parsed.text, /## Sheet: Specs/i)
   assert.match(parsed.text, /\| sku \| feature \|/i)
-  assert.match(parsed.sourceLocator || '', /Specs:R1-R3/)
+  assert.match(parsed.sourceLocator || '', /sheet:Specs row:1-3/)
+  assert.equal(parsed.segments?.length, 1)
+  assert.match(parsed.segments?.[0]?.sourceLocator || '', /sheet:Specs row:1-3/)
 
   const chunks = splitIntoChunks(parsed.text, 80, 20)
   assert.ok(chunks.length >= 1)
+})
+
+test('integration: xlsx multi-sheet keeps per-block locators', async () => {
+  const wb = XLSX.utils.book_new()
+  const ws1 = XLSX.utils.aoa_to_sheet([
+    ['order_no', 'qty'],
+    ['TW001', '10'],
+    [],
+    ['sku', 'color'],
+    ['A1', 'blue']
+  ])
+  const ws2 = XLSX.utils.aoa_to_sheet([
+    ['part', 'material'],
+    ['pump', 'PVC']
+  ])
+  XLSX.utils.book_append_sheet(wb, ws1, 'Orders')
+  XLSX.utils.book_append_sheet(wb, ws2, 'Parts')
+  const xlsxBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+
+  const parsed = await parseDocument(xlsxBuffer, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'multi.xlsx')
+  assert.equal(parsed.sourceType, 'xlsx')
+  assert.match(parsed.text, /## Sheet: Orders/i)
+  assert.match(parsed.text, /## Sheet: Parts/i)
+  assert.equal(parsed.segments?.length, 3)
+  assert.deepEqual(
+    parsed.segments?.map((segment) => segment.sourceLocator),
+    ['sheet:Orders row:1-2', 'sheet:Orders row:4-5', 'sheet:Parts row:1-2']
+  )
+})
+
+test('integration: xlsx cleanup preserves original row locators after repeated edge removal', async () => {
+  const wb = XLSX.utils.book_new()
+  const ws1 = XLSX.utils.aoa_to_sheet([
+    ['生产指令单'],
+    ['订单号', 'TW001'],
+    ['sku', 'A1'],
+    ['备注：内部使用']
+  ])
+  const ws2 = XLSX.utils.aoa_to_sheet([
+    ['生产指令单'],
+    ['订单号', 'TW002'],
+    ['sku', 'A2'],
+    ['备注：内部使用']
+  ])
+  XLSX.utils.book_append_sheet(wb, ws1, 'One')
+  XLSX.utils.book_append_sheet(wb, ws2, 'Two')
+  const xlsxBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+
+  const parsed = await parseDocument(xlsxBuffer, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'clean.xlsx')
+  assert.equal(parsed.segments?.length, 2)
+  assert.deepEqual(
+    parsed.segments?.map((segment) => segment.sourceLocator),
+    ['sheet:One row:2-3', 'sheet:Two row:2-3']
+  )
+  assert.equal(parsed.text.includes('生产指令单'), false)
+  assert.equal(parsed.text.includes('备注：内部使用'), false)
 })

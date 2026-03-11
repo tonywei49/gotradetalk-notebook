@@ -27,7 +27,7 @@ export type IndexItemFileRow = {
 function buildInlineTextSource(item: Pick<IndexItemRow, 'title' | 'content_markdown'>) {
   const text = `${item.title || ''}\n${item.content_markdown || ''}`.trim()
   if (!text) return null
-  return { text, sourceType: 'text', sourceLocator: null as string | null }
+  return { text, sourceType: 'text', sourceLocator: null as string | null, segments: undefined as Array<{ text: string; sourceLocator?: string }> | undefined }
 }
 
 function isImageSource(mime?: string | null, fileName?: string | null) {
@@ -110,7 +110,8 @@ async function extractSingleFileSource(params: {
     return {
       text: combinedText || ocrResult.text,
       sourceType: 'image_ocr',
-      sourceLocator: file.matrix_media_name || file.matrix_media_mxc
+      sourceLocator: file.matrix_media_name || file.matrix_media_mxc,
+      segments: undefined
     }
   }
 
@@ -118,7 +119,8 @@ async function extractSingleFileSource(params: {
   return {
     text: parsed.text,
     sourceType: parsed.sourceType,
-    sourceLocator: parsed.sourceLocator || file.matrix_media_name || file.matrix_media_mxc
+    sourceLocator: parsed.sourceLocator || file.matrix_media_name || file.matrix_media_mxc,
+    segments: parsed.segments
   }
 }
 
@@ -149,7 +151,7 @@ export async function extractItemSources(params: {
     return inlineSource ? [inlineSource] : []
   }
 
-  const outputs = [] as Array<{ text: string; sourceType: string; sourceLocator: string | null }>
+  const outputs = [] as Array<{ text: string; sourceType: string; sourceLocator: string | null; segments?: Array<{ text: string; sourceLocator?: string }> }>
   const inlineSource = buildInlineTextSource(item)
   if (inlineSource) outputs.push(inlineSource)
 

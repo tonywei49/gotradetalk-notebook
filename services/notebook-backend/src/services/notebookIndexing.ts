@@ -88,20 +88,26 @@ export async function runNotebookIndexJob(jobId: string, options?: { matrixBaseU
       const jobChunkSeparator = job.chunk_separator || undefined
       console.log(`[notebookIndexing] job=${job.id} chunk_strategy=${job.chunk_strategy} → ${jobChunkStrategy}, chunk_size=${job.chunk_size} → ${jobChunkSize}, chunk_separator=${JSON.stringify(job.chunk_separator)}`)
       const chunks = extractedList.flatMap((extracted) => {
-        const sourceChunks = splitIntoChunksByStrategy(
-          extracted.text,
-          jobChunkStrategy,
-          jobChunkSize,
-          jobChunkSeparator
-        )
-        const mapped = sourceChunks.map((chunk, localIdx) => ({
-          ...chunk,
-          chunkIndex: chunkIndexOffset + localIdx,
-          sourceType: extracted.sourceType,
-          sourceLocator: extracted.sourceLocator
-        }))
-        chunkIndexOffset += sourceChunks.length
-        return mapped
+        const segmentList = extracted.segments && extracted.segments.length > 0
+          ? extracted.segments
+          : [{ text: extracted.text, sourceLocator: extracted.sourceLocator || undefined }]
+
+        return segmentList.flatMap((segment) => {
+          const sourceChunks = splitIntoChunksByStrategy(
+            segment.text,
+            jobChunkStrategy,
+            jobChunkSize,
+            jobChunkSeparator
+          )
+          const mapped = sourceChunks.map((chunk, localIdx) => ({
+            ...chunk,
+            chunkIndex: chunkIndexOffset + localIdx,
+            sourceType: extracted.sourceType,
+            sourceLocator: segment.sourceLocator || extracted.sourceLocator
+          }))
+          chunkIndexOffset += sourceChunks.length
+          return mapped
+        })
       })
 
       await ensureQdrantCollection()
