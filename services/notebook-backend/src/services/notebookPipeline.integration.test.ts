@@ -95,3 +95,27 @@ test('integration: xlsx cleanup preserves original row locators after repeated e
   assert.equal(parsed.text.includes('备注：内部使用'), false)
   assert.match(parsed.text, /row_2: 订单号=sku; TW001=A1/i)
 })
+
+test('integration: xlsx parser trims inflated worksheet range before extraction', async () => {
+  const wb = XLSX.utils.book_new()
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['关键词', '搜索量'],
+    ['气垫床', '1200'],
+    ['病床', '800']
+  ])
+  ws['!ref'] = 'A1:XFD5000'
+  XLSX.utils.book_append_sheet(wb, ws, 'Keywords')
+  const xlsxBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+
+  const parsed = await parseDocument(
+    xlsxBuffer,
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'inflated-range.xlsx'
+  )
+
+  assert.equal(parsed.sourceType, 'xlsx')
+  assert.match(parsed.text, /\| 关键词 \| 搜索量 \|/i)
+  assert.match(parsed.text, /row_2: 关键词=气垫床; 搜索量=1200/i)
+  assert.equal(parsed.text.includes('col_100'), false)
+  assert.equal(parsed.segments?.length, 1)
+})

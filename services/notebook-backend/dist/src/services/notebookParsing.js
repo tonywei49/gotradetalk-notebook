@@ -151,6 +151,37 @@ function toSheetRows(rows) {
         cells: cells || []
     }));
 }
+function getEffectiveWorksheetRange(ws) {
+    const cellKeys = Object.keys(ws).filter((key) => !key.startsWith('!'));
+    if (cellKeys.length === 0) {
+        return String(ws['!ref'] || 'A1:A1');
+    }
+    let minRow = Number.POSITIVE_INFINITY;
+    let minCol = Number.POSITIVE_INFINITY;
+    let maxRow = 0;
+    let maxCol = 0;
+    for (const key of cellKeys) {
+        const cell = ws[key];
+        if (!cell)
+            continue;
+        const address = XLSX.utils.decode_cell(key);
+        if (address.r < minRow)
+            minRow = address.r;
+        if (address.c < minCol)
+            minCol = address.c;
+        if (address.r > maxRow)
+            maxRow = address.r;
+        if (address.c > maxCol)
+            maxCol = address.c;
+    }
+    if (!Number.isFinite(minRow) || !Number.isFinite(minCol)) {
+        return String(ws['!ref'] || 'A1:A1');
+    }
+    return XLSX.utils.encode_range({
+        s: { r: minRow, c: minCol },
+        e: { r: maxRow, c: maxCol }
+    });
+}
 function removeRepeatedWorkbookEdgeRows(sheetRowsList) {
     if (sheetRowsList.length < 2)
         return sheetRowsList;
@@ -481,7 +512,11 @@ export async function parseDocument(buffer, matrixMediaMime, matrixMediaName) {
         let firstLocator = '';
         const workbookSheets = workbook.SheetNames.map((sheetName) => {
             const ws = workbook.Sheets[sheetName];
-            const json = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
+            const json = XLSX.utils.sheet_to_json(ws, {
+                header: 1,
+                raw: false,
+                range: getEffectiveWorksheetRange(ws)
+            });
             return {
                 sheetName,
                 rawRows: json,
