@@ -18,7 +18,10 @@ export async function runNotebookIndexJob(jobId, options) {
     if (!job) {
         throw new Error('JOB_NOT_FOUND');
     }
-    await markIndexJobRunning(job.id);
+    const claimed = await markIndexJobRunning(job.id);
+    if (!claimed) {
+        return;
+    }
     try {
         const item = await getNotebookItemByCompany(job.item_id, job.company_id);
         if (!item) {

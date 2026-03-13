@@ -312,9 +312,10 @@ export async function getIndexJobById(jobId) {
     return result.rows[0] || null;
 }
 export async function markIndexJobRunning(jobId) {
-    await dbQuery(`update public.notebook_index_jobs
+    const result = await dbQuery(`update public.notebook_index_jobs
      set status = 'running', started_at = now(), error_message = null
-     where id = $1`, [jobId]);
+     where id = $1 and status = 'pending'`, [jobId]);
+    return (result.rowCount || 0) > 0;
 }
 export async function markIndexJobSuccess(jobId) {
     await dbQuery(`update public.notebook_index_jobs
@@ -355,7 +356,16 @@ export async function replaceItemChunks(params) {
     }
     await dbQuery(`insert into public.notebook_chunks
       (item_id, company_id, owner_user_id, chunk_index, chunk_text, token_count, content_hash, source_type, source_locator)
-     values ${tuples.join(', ')}`, values);
+     values ${tuples.join(', ')}
+     on conflict (item_id, chunk_index) do update
+       set company_id = excluded.company_id,
+           owner_user_id = excluded.owner_user_id,
+           chunk_text = excluded.chunk_text,
+           token_count = excluded.token_count,
+           content_hash = excluded.content_hash,
+           source_type = excluded.source_type,
+           source_locator = excluded.source_locator,
+           updated_at = now()`, values);
 }
 export async function deleteChunksByItem(companyId, itemId) {
     await dbQuery(`delete from public.notebook_chunks
