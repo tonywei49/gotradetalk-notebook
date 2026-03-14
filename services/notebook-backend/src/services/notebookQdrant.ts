@@ -4,6 +4,9 @@ export type QdrantPoint = {
   payload: Record<string, unknown>
 }
 
+const DEFAULT_QDRANT_UPSERT_MAX_BYTES = 8 * 1024 * 1024
+const DEFAULT_QDRANT_UPSERT_MAX_POINTS = 128
+
 export function getQdrantConfig() {
   const baseUrl = String(process.env.QDRANT_URL || '').trim()
   const apiKey = String(process.env.QDRANT_API_KEY || '').trim()
@@ -22,6 +25,43 @@ function buildHeaders(apiKey: string) {
 
 function isCollectionMissing(status: number, text: string) {
   return status === 404 && /not\s+exist|not\s+found|doesn't exist|does not exist/i.test(text)
+}
+
+function getUpsertBatchLimits() {
+  const maxBytes = Math.max(Number(process.env.QDRANT_UPSERT_MAX_BYTES || DEFAULT_QDRANT_UPSERT_MAX_BYTES), 256 * 1024)
+  const maxPoints = Math.max(Number(process.env.QDRANT_UPSERT_MAX_POINTS || DEFAULT_QDRANT_UPSERT_MAX_POINTS), 1)
+  return { maxBytes, maxPoints }
+}
+
+function splitPointsForUpsert(
+  points: QdrantPoint[],
+  limits: { maxBytes: number; maxPoints: number } = getUpsertBatchLimits()
+) {
+  const { maxBytes, maxPoints } = limits
+  const batches: QdrantPoint[][] = []
+  let current: QdrantPoint[] = []
+  let currentBytes = Buffer.byteLength('{"points":[]}', 'utf8')
+
+  for (const point of points) {
+    const pointBytes = Buffer.byteLength(JSON.stringify(point), 'utf8') + 1
+    const exceedsPointLimit = current.length >= maxPoints
+    const exceedsByteLimit = current.length > 0 && (currentBytes + pointBytes > maxBytes)
+
+    if (exceedsPointLimit || exceedsByteLimit) {
+      batches.push(current)
+      current = []
+      currentBytes = Buffer.byteLength('{"points":[]}', 'utf8')
+    }
+
+    current.push(point)
+    currentBytes += pointBytes
+  }
+
+  if (current.length > 0) {
+    batches.push(current)
+  }
+
+  return batches
 }
 
 export async function ensureQdrantCollection() {
@@ -62,15 +102,19 @@ export async function upsertNotebookPoints(points: QdrantPoint[]) {
   }
 
   const headers = buildHeaders(apiKey)
-  const resp = await fetch(`${baseUrl}/collections/${encodeURIComponent(collection)}/points?wait=true`, {
-    method: 'PUT',
-    headers,
-    body: JSON.stringify({ points })
-  })
+  const batches = splitPointsForUpsert(points)
 
-  if (!resp.ok) {
-    const text = await resp.text()
-    throw new Error(`QDRANT_UPSERT_FAILED: ${resp.status} ${text}`)
+  for (const batch of batches) {
+    const resp = await fetch(`${baseUrl}/collections/${encodeURIComponent(collection)}/points?wait=true`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ points: batch })
+    })
+
+    if (!resp.ok) {
+      const text = await resp.text()
+      throw new Error(`QDRANT_UPSERT_FAILED: ${resp.status} ${text}`)
+    }
   }
 }
 
@@ -99,6 +143,10 @@ export async function deleteNotebookPointsByItem(companyId: string, itemId: stri
     }
     throw new Error(`QDRANT_DELETE_FAILED: ${resp.status} ${text}`)
   }
+}
+
+export const __notebookQdrantTestables = {
+  splitPointsForUpsert
 }
 
 export async function searchNotebookVectors(
