@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { splitIntoChunks } from './notebookChunking.js';
+import { enforceChunkCharLimit, splitIntoChunks } from './notebookChunking.js';
 test('splitIntoChunks creates overlapping chunks', () => {
     const input = 'a'.repeat(2200);
     const chunks = splitIntoChunks(input, 1000, 200);
@@ -60,4 +60,18 @@ test('splitIntoChunks avoids splitting inside code fences', () => {
         const fenceCount = (chunk.text.match(/```/g) || []).length;
         assert.ok(fenceCount === 0 || fenceCount % 2 === 0);
     }
+});
+test('enforceChunkCharLimit automatically re-splits oversized chunks', () => {
+    const chunks = enforceChunkCharLimit([
+        {
+            chunkIndex: 0,
+            text: 'x'.repeat(9500),
+            tokenCount: 2375,
+            contentHash: 'oversized'
+        }
+    ], 4000);
+    assert.ok(chunks.length > 1);
+    assert.ok(chunks.every((chunk) => chunk.text.length <= 4000));
+    assert.equal(chunks[0]?.chunkIndex, 0);
+    assert.equal(chunks[chunks.length - 1]?.chunkIndex, chunks.length - 1);
 });

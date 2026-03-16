@@ -39,18 +39,22 @@ function splitPointsForUpsert(
 ) {
   const { maxBytes, maxPoints } = limits
   const batches: QdrantPoint[][] = []
+  const baseBytes = Buffer.byteLength('{"points":[]}', 'utf8')
   let current: QdrantPoint[] = []
-  let currentBytes = Buffer.byteLength('{"points":[]}', 'utf8')
+  let currentBytes = baseBytes
 
   for (const point of points) {
     const pointBytes = Buffer.byteLength(JSON.stringify(point), 'utf8') + 1
+    if (baseBytes + pointBytes > maxBytes) {
+      throw new Error(`QDRANT_POINT_TOO_LARGE: point payload (${baseBytes + pointBytes} bytes) exceeds batch limit (${maxBytes} bytes)`)
+    }
     const exceedsPointLimit = current.length >= maxPoints
     const exceedsByteLimit = current.length > 0 && (currentBytes + pointBytes > maxBytes)
 
     if (exceedsPointLimit || exceedsByteLimit) {
       batches.push(current)
       current = []
-      currentBytes = Buffer.byteLength('{"points":[]}', 'utf8')
+      currentBytes = baseBytes
     }
 
     current.push(point)

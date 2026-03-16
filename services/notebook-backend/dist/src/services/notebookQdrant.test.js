@@ -33,3 +33,17 @@ test('splitPointsForUpsert respects max point count even when payload is small',
     });
     assert.deepEqual(batches.map((batch) => batch.length), [4, 4, 1]);
 });
+test('splitPointsForUpsert throws when a single point exceeds max bytes', () => {
+    const points = [{
+            id: 'p-1',
+            vector: [0.1, 0.2, 0.3],
+            payload: {
+                text_preview: 'x'.repeat(5000),
+                chunk_index: 1
+            }
+        }];
+    assert.throws(() => __notebookQdrantTestables.splitPointsForUpsert(points, {
+        maxBytes: 1024,
+        maxPoints: 10
+    }), /QDRANT_POINT_TOO_LARGE/);
+});

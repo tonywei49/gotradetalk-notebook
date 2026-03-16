@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+const DEFAULT_MAX_CHUNK_CHARS = 4000;
 export function estimateTokenCount(text) {
     const trimmed = text.trim();
     if (!trimmed)
@@ -194,4 +195,47 @@ export function splitIntoChunksByStrategy(text, strategy = 'smart', chunkSize = 
     const customSep = separator || '\n';
     const segments = splitByDelimiter(normalized, customSep);
     return segmentsToChunks(segments, safeSize);
+}
+export function enforceChunkCharLimit(chunks, maxChunkChars = DEFAULT_MAX_CHUNK_CHARS) {
+    const safeMaxChars = Math.max(300, Math.floor(maxChunkChars));
+    const normalized = [];
+    let index = 0;
+    const pushChunk = (chunk) => {
+        normalized.push({
+            ...chunk,
+            chunkIndex: index
+        });
+        index += 1;
+    };
+    for (const chunk of chunks) {
+        const shared = { ...chunk };
+        const queue = [chunk.text];
+        while (queue.length > 0) {
+            const text = String(queue.shift() || '').trim();
+            if (!text)
+                continue;
+            if (text.length <= safeMaxChars) {
+                pushChunk({
+                    ...shared,
+                    chunkIndex: index,
+                    text,
+                    tokenCount: estimateTokenCount(text),
+                    contentHash: createHash('sha256').update(text).digest('hex')
+                });
+                continue;
+            }
+            const subChunkSize = Math.max(300, Math.min(Math.floor(safeMaxChars * 0.85), 2000));
+            const overlap = Math.min(Math.floor(subChunkSize * 0.15), 120);
+            const split = splitIntoChunks(text, subChunkSize, overlap);
+            if (split.length <= 1 && split[0]?.text.length === text.length) {
+                const midpoint = Math.floor(text.length / 2);
+                queue.unshift(text.slice(midpoint), text.slice(0, midpoint));
+                continue;
+            }
+            for (let i = split.length - 1; i >= 0; i -= 1) {
+                queue.unshift(split[i].text);
+            }
+        }
+    }
+    return normalized;
 }

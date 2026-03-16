@@ -1,12 +1,20 @@
 import { randomUUID } from 'crypto';
 import { createIndexJob, deleteChunksByItem, getIndexJobById, listActiveNotebookItemFilesByItem, getNotebookItemByCompany, getIndexableActiveItemIdSet, getNotebookItemSources, listPendingIndexJobIds, markIndexJobFailed, markIndexJobRunning, markIndexJobSuccess, replaceItemChunks, searchChunksByQuery, upsertItemIndexState } from '../repos/notebookRepo.js';
-import { splitIntoChunksByStrategy } from './notebookChunking.js';
+import { enforceChunkCharLimit, splitIntoChunksByStrategy } from './notebookChunking.js';
 import { createEmbedding, getNotebookAiConfig, rerankCandidates } from './notebookLlm.js';
 import { deleteNotebookPointsByItem, ensureQdrantCollection, getQdrantConfig, searchNotebookVectors, upsertNotebookPoints } from './notebookQdrant.js';
 import { enqueueNotebookJobId } from './notebookQueue.js';
 import { extractItemSources } from './sourceExtractors.js';
 const STRONG_SIGNAL_MIN_SCORE = 0.82;
 const STRONG_SIGNAL_MIN_GAP = 0.12;
+const DEFAULT_NOTEBOOK_MAX_CHUNK_CHARS = 4000;
+const DEFAULT_QDRANT_TEXT_PREVIEW_CHARS = 500;
+function getMaxChunkChars() {
+    return Math.max(Number(process.env.NOTEBOOK_MAX_CHUNK_CHARS || DEFAULT_NOTEBOOK_MAX_CHUNK_CHARS), 300);
+}
+function getQdrantTextPreviewChars() {
+    return Math.max(Number(process.env.QDRANT_TEXT_PREVIEW_CHARS || DEFAULT_QDRANT_TEXT_PREVIEW_CHARS), 120);
+}
 export async function enqueueNotebookIndexJob(params) {
     const data = await createIndexJob(params);
     if (data?.id) {
@@ -60,7 +68,7 @@ export async function runNotebookIndexJob(jobId, options) {
             const jobChunkSize = job.chunk_size || Number(process.env.NOTEBOOK_CHUNK_SIZE || 1000);
             const jobChunkSeparator = job.chunk_separator || undefined;
             console.log(`[notebookIndexing] job=${job.id} chunk_strategy=${job.chunk_strategy} → ${jobChunkStrategy}, chunk_size=${job.chunk_size} → ${jobChunkSize}, chunk_separator=${JSON.stringify(job.chunk_separator)}`);
-            const chunks = extractedList.flatMap((extracted) => {
+            const rawChunks = extractedList.flatMap((extracted) => {
                 const segmentList = extracted.segments && extracted.segments.length > 0
                     ? extracted.segments
                     : [{ text: extracted.text, sourceLocator: extracted.sourceLocator || undefined }];
@@ -76,6 +84,10 @@ export async function runNotebookIndexJob(jobId, options) {
                     return mapped;
                 });
             });
+            const chunks = enforceChunkCharLimit(rawChunks, getMaxChunkChars()).map((chunk, idx) => ({
+                ...chunk,
+                chunkIndex: idx
+            }));
             await ensureQdrantCollection();
             await replaceItemChunks({
                 itemId: item.id,
@@ -104,7 +116,7 @@ export async function runNotebookIndexJob(jobId, options) {
                         content_hash: chunk.contentHash,
                         source_type: chunk.sourceType,
                         source_locator: chunk.sourceLocator,
-                        text: chunk.text,
+                        text_preview: chunk.text.slice(0, getQdrantTextPreviewChars()),
                         updated_at: new Date().toISOString()
                     }
                 });
@@ -205,7 +217,7 @@ export async function hybridSearchNotebook(params) {
     for (const hit of vectorHits) {
         const payload = hit.payload || {};
         const itemId = String(payload.item_id || '');
-        const snippet = String(payload.chunk_text || payload.text || '');
+        const snippet = String(payload.chunk_text || payload.text_preview || '');
         if (!itemId)
             continue;
         const key = `${itemId}:${String(payload.chunk_index || 0)}`;
