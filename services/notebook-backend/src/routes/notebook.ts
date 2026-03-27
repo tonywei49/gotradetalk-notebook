@@ -816,11 +816,18 @@ export async function assistQuery(req: Request, res: Response) {
   if (!context) return sendNotebookError(res, 401, 'UNAUTHORIZED')
   if (!ensureAssistAllowed(context, res)) return
 
-  const body = req.body as { room_id?: string; query?: string; top_k?: number; response_lang?: string; scope?: 'personal' | 'company' | 'both' }
+  const body = req.body as {
+    room_id?: string
+    query?: string
+    top_k?: number
+    response_lang?: string
+    scope?: 'personal' | 'company' | 'both'
+    knowledge_scope?: 'personal' | 'company' | 'both'
+  }
   const queryText = String(body.query || '').trim()
   const roomId = String(body.room_id || '').trim() || null
   const responseLang = String(body.response_lang || '').trim() || 'zh-TW'
-  const scope = parseScope(body.scope)
+  const scope = parseScope(body.scope || body.knowledge_scope)
   if (!queryText) return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing query')
 
   const topK = Math.max(1, Math.min(Number(body.top_k || context.policy.retrieval_top_k || 5), 20))
@@ -852,12 +859,19 @@ export async function assistFromContext(req: Request, res: Response) {
   if (!context) return sendNotebookError(res, 401, 'UNAUTHORIZED')
   if (!ensureAssistAllowed(context, res)) return
 
-  const body = req.body as { room_id?: string; anchor_event_id?: string; window_size?: number; response_lang?: string; scope?: 'personal' | 'company' | 'both' }
+  const body = req.body as {
+    room_id?: string
+    anchor_event_id?: string
+    window_size?: number
+    response_lang?: string
+    scope?: 'personal' | 'company' | 'both'
+    knowledge_scope?: 'personal' | 'company' | 'both'
+  }
   const roomId = String(body.room_id || '').trim()
   const anchorEventId = String(body.anchor_event_id || '').trim()
   const windowSize = Math.min(Math.max(Number(body.window_size || 5), 1), 20)
   const responseLang = String(body.response_lang || '').trim() || 'zh-TW'
-  const scope = parseScope(body.scope)
+  const scope = parseScope(body.scope || body.knowledge_scope)
 
   if (!roomId || !anchorEventId) {
     return sendNotebookError(res, 422, 'INVALID_CONTEXT')

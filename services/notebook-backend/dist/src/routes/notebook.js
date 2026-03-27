@@ -681,7 +681,7 @@ export async function assistQuery(req, res) {
     const queryText = String(body.query || '').trim();
     const roomId = String(body.room_id || '').trim() || null;
     const responseLang = String(body.response_lang || '').trim() || 'zh-TW';
-    const scope = parseScope(body.scope);
+    const scope = parseScope(body.scope || body.knowledge_scope);
     if (!queryText)
         return sendNotebookError(res, 400, 'VALIDATION_ERROR', 'Missing query');
     const topK = Math.max(1, Math.min(Number(body.top_k || context.policy.retrieval_top_k || 5), 20));
@@ -718,7 +718,7 @@ export async function assistFromContext(req, res) {
     const anchorEventId = String(body.anchor_event_id || '').trim();
     const windowSize = Math.min(Math.max(Number(body.window_size || 5), 1), 20);
     const responseLang = String(body.response_lang || '').trim() || 'zh-TW';
-    const scope = parseScope(body.scope);
+    const scope = parseScope(body.scope || body.knowledge_scope);
     if (!roomId || !anchorEventId) {
         return sendNotebookError(res, 422, 'INVALID_CONTEXT');
     }

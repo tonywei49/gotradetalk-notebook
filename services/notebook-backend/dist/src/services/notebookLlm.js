@@ -52,6 +52,18 @@ function wrapProviderError(provider, message) {
         return detail;
     return `MODEL_ERROR(provider=${provider}): ${detail}`;
 }
+function extractReferenceAnswer(content) {
+    const normalized = String(content || '')
+        .replace(/\n?\s*CONFIDENCE\s*[:：]\s*(0(?:\.\d+)?|1(?:\.0+)?)\s*$/gi, '')
+        .trim();
+    if (!normalized)
+        return '知識庫未找到明確依據';
+    const taggedMatch = normalized.match(/(?:^|\n)\s*(?:參考答案|参考答案|答案)\s*[:：]\s*([\s\S]*?)$/i);
+    const extracted = String(taggedMatch?.[1] || normalized)
+        .replace(/^(?:參考答案|参考答案|答案)\s*[:：]\s*/i, '')
+        .trim();
+    return extracted || '知識庫未找到明確依據';
+}
 export async function getNotebookAiConfig(companyId) {
     const runtimePolicy = await resolveAiRuntimePolicy({
         subjectType: 'company',
@@ -192,7 +204,9 @@ export async function generateAssistAnswer(config, query, contextBlocks, respons
     const systemPrompt = [
         '你是一名优秀的业务人员，将根据知识库召回的内容，结合用户问题及其前文内容，生成出一段可直接回复客户的内容。',
         '只可依照知识库内容的资讯进行回复，不可自行添加常识或知识库没有的答案。',
-        '如果知识库内容不足以回复问题，请输出：知识库未搜寻到明确依据。'
+        '如果知识库内容不足以回复问题，请输出：知识库未搜寻到明确依据。',
+        '输出时请直接给出完整答复正文，不要附加说明或格式标签。',
+        '不要只输出“你好”或“您好”这类单独问候语；如果需要礼貌开场，后面必须紧接完整答案。'
     ].join('\n');
     const userPrompt = [
         `當前客戶問題：${currentQuestion || query}`,
@@ -227,16 +241,8 @@ export async function generateAssistAnswer(config, query, contextBlocks, respons
         throw new Error(wrapProviderError('chat', `${resp.status} ${body}`));
     }
     const body = await resp.json();
-    const content = String(body.choices?.[0]?.message?.content || '')
-        .replace(/\n?\s*CONFIDENCE\s*[:：]\s*(0(?:\.\d+)?|1(?:\.0+)?)\s*$/gi, '')
-        .trim();
-    const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    const referenceMatch = content.match(/參考答案\s*[:：]\s*([\s\S]*?)$/i);
-    const fallbackLine = lines.find(Boolean) || '知識庫未找到明確依據';
-    const referenceAnswer = String(referenceMatch?.[1] || fallbackLine)
-        .replace(/\s+/g, ' ')
-        .replace(/^參考答案\s*[:：]\s*/i, '')
-        .trim() || '知識庫未找到明確依據';
+    const content = String(body.choices?.[0]?.message?.content || '');
+    const referenceAnswer = extractReferenceAnswer(content);
     const summary = referenceAnswer;
     const answer = referenceAnswer;
     return { answer, summary, referenceAnswer };
