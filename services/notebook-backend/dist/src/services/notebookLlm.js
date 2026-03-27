@@ -176,28 +176,36 @@ export async function rerankCandidates(config, query, candidates) {
         .map((item, index) => ({ text: item.text, score: scores.get(index) ?? item.score, index }))
         .sort((a, b) => b.score - a.score);
 }
-export async function generateAssistAnswer(config, query, contextBlocks, responseLanguage) {
+export async function generateAssistAnswer(config, query, contextBlocks, responseLanguage, promptContext) {
     if (!config.chatBaseUrl || !config.chatApiKey) {
         throw new Error('CAPABILITY_DISABLED');
     }
     const contextText = contextBlocks.map((c) => `${c.source} ${String(c.text || '').replace(/\s+/g, ' ').trim()}`).join('\n');
     const languageInstruction = buildLanguageInstruction(responseLanguage || 'zh-TW');
+    const currentQuestion = String(promptContext?.currentQuestion || query || '').trim();
+    const priorMessages = (promptContext?.priorMessages || []).map((line) => String(line || '').trim()).filter(Boolean).slice(-5);
     const systemPrompt = [
-        '你是「知識庫回答生成器」。',
-        '你只能依據提供的召回內容回答，不得使用外部常識補全或糾正知識庫內容。',
-        '即使召回內容與常識衝突，也必須以召回內容為準。',
-        '你必須輸出兩行，且只能兩行：',
-        '總結歸納：{內容}',
-        '參考答案：{內容}',
-        '「參考答案」要可直接回覆、語氣自然且可執行。',
-        '若召回內容中存在可回答資訊，禁止輸出「知識庫未找到明確依據」。',
-        '若證據不足，兩行都要明確寫「知識庫未找到明確依據」。',
+        '你是「客服參考答案生成器」。',
+        '你只能依據提供的知識庫引用內容回答，不得使用外部常識補全、糾正或猜測。',
+        '即使引用內容與常識衝突，也必須以引用內容為準。',
+        '你要輸出的是一段可直接回覆給客戶的內容。',
+        '只輸出一行：參考答案：{內容}',
+        '優先回答「當前客戶問題」；前面5句對話只作背景輔助。',
+        '不要照抄原始引用格式，不要輸出頁碼、Markdown 標題、KPI/KDL 編號、分頁符、來源標記。',
+        '不要輸出「根據召回內容」「根據引用內容」這類開場。',
+        '若引用內容足夠，必須整理成自然、專業、可直接發送的客服回覆。',
+        '若證據不足，才可輸出：參考答案：知識庫未找到明確依據',
         '禁止輸出 CONFIDENCE、禁止輸出額外段落、禁止空白行。'
     ].join('\n');
     const userPrompt = [
+        `當前客戶問題（優先級最高）：${currentQuestion || query}`,
+        '前文背景（最多5句，僅輔助理解，不一定都相關）：',
+        ...priorMessages.map((line, index) => `${index + 1}. ${line}`),
+        ...(priorMessages.length === 0 ? ['(無前文背景)'] : []),
         `檢索關鍵詞：${query}`,
-        '召回內容（最多3條）：',
+        '知識庫引用內容（最多3條）：',
         contextText || '(無來源)',
+        '請根據以上內容，輸出一段可直接回覆客戶的參考答案。',
         languageInstruction
     ].join('\n');
     let resp;
@@ -227,24 +235,30 @@ export async function generateAssistAnswer(config, query, contextBlocks, respons
         .replace(/\n?\s*CONFIDENCE\s*[:：]\s*(0(?:\.\d+)?|1(?:\.0+)?)\s*$/gi, '')
         .trim();
     const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    const summaryMatch = content.match(/總結歸納\s*[:：]\s*([\s\S]*?)(?:\n\s*參考答案\s*[:：]|$)/i);
     const referenceMatch = content.match(/參考答案\s*[:：]\s*([\s\S]*?)$/i);
     const fallbackLine = lines.find(Boolean) || '知識庫未找到明確依據';
-    let summary = String(summaryMatch?.[1] || fallbackLine).replace(/\s+/g, ' ').trim() || '知識庫未找到明確依據';
-    let referenceAnswer = String(referenceMatch?.[1] || summary).replace(/\s+/g, ' ').trim() || '知識庫未找到明確依據';
+    let referenceAnswer = String(referenceMatch?.[1] || fallbackLine)
+        .replace(/\s+/g, ' ')
+        .replace(/(?:^|\s)(?:#{1,6}\s*Page\s+\d+|--\s*\d+\s+of\s+\d+\s*--|\[[A-Z]{2,}\d+\]|\b[Kk][Pp][Ii]\d+\b|\b[Kk][Dd][Ll]\d+\b)\s*/g, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim() || '知識庫未找到明確依據';
     const noEvidencePhrase = '知識庫未找到明確依據';
     const hasAnyContext = contextBlocks.some((block) => String(block.text || '').trim().length > 0);
-    const saysNoEvidence = summary.includes(noEvidencePhrase) || referenceAnswer.includes(noEvidencePhrase);
+    const saysNoEvidence = referenceAnswer.includes(noEvidencePhrase);
     // Guardrail: when retrieval has content, avoid contradictory "no evidence" output.
     if (hasAnyContext && saysNoEvidence) {
         const topBlock = contextBlocks.find((block) => String(block.text || '').trim().length > 0);
-        const topText = String(topBlock?.text || '').replace(/\s+/g, ' ').trim();
+        const topText = String(topBlock?.text || '')
+            .replace(/\s+/g, ' ')
+            .replace(/(?:^|\s)(?:#{1,6}\s*Page\s+\d+|--\s*\d+\s+of\s+\d+\s*--|\[[A-Z]{2,}\d+\]|\b[Kk][Pp][Ii]\d+\b|\b[Kk][Dd][Ll]\d+\b)\s*/g, ' ')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
         if (topText) {
-            summary = `根據召回內容，${topText}`;
             referenceAnswer = topText;
         }
     }
-    const answer = `總結歸納：${summary}\n參考答案：${referenceAnswer}`;
+    const summary = referenceAnswer;
+    const answer = referenceAnswer;
     return { answer, summary, referenceAnswer };
 }
 export async function refineContextAssistQuery(config, params) {

@@ -59,7 +59,10 @@ export async function runNotebookAssist(params) {
         source: `[${s.source_title || s.item_id}|S${idx + 1}]${s.source_locator ? ` ${s.source_locator}` : ''}`,
         text: s.snippet
     }));
-    const { answer, summary, referenceAnswer } = await generateAssistAnswer(aiConfig, params.queryText, blocks, params.responseLang);
+    const { answer, summary, referenceAnswer } = await generateAssistAnswer(aiConfig, params.queryText, blocks, params.responseLang, {
+        currentQuestion: params.promptCurrentQuestion || params.queryText,
+        priorMessages: params.promptPriorMessages || []
+    });
     const confidence = computeAssistConfidence(displaySources.map((source) => Number(source.score || 0)));
     const noEvidencePhrase = '知識庫未找到明確依據';
     const insufficientEvidence = summary.includes(noEvidencePhrase)

@@ -23,6 +23,8 @@ export async function runNotebookAssist(params: {
   scope: 'personal' | 'company' | 'both'
   roomId?: string | null
   queryText: string
+  promptCurrentQuestion?: string | null
+  promptPriorMessages?: string[] | null
   topK: number
   responseLang: string
   triggerType: 'manual_query' | 'from_message_context'
@@ -73,7 +75,16 @@ export async function runNotebookAssist(params: {
     text: s.snippet
   }))
 
-  const { answer, summary, referenceAnswer } = await generateAssistAnswer(aiConfig, params.queryText, blocks, params.responseLang)
+  const { answer, summary, referenceAnswer } = await generateAssistAnswer(
+    aiConfig,
+    params.queryText,
+    blocks,
+    params.responseLang,
+    {
+      currentQuestion: params.promptCurrentQuestion || params.queryText,
+      priorMessages: params.promptPriorMessages || []
+    }
+  )
   const confidence = computeAssistConfidence(displaySources.map((source) => Number(source.score || 0)))
   const noEvidencePhrase = '知識庫未找到明確依據'
   const insufficientEvidence =
