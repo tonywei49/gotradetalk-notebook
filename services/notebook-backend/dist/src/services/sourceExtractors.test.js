@@ -15,7 +15,7 @@ const visionConfig = {
     fallbackApiKey: '',
     fallbackModel: null
 };
-test('extractItemSources: text item indexes title + content', async () => {
+test('extractItemSources: text item indexes content only', async () => {
     const sources = await extractItemSources({
         item: {
             id: 'item-text-1',
@@ -35,10 +35,10 @@ test('extractItemSources: text item indexes title + content', async () => {
     });
     assert.equal(sources.length, 1);
     assert.equal(sources[0]?.sourceType, 'text');
-    assert.match(sources[0]?.text || '', /My title/);
     assert.match(sources[0]?.text || '', /Body content/);
+    assert.doesNotMatch(sources[0]?.text || '', /My title/);
 });
-test('extractItemSources: file item also indexes title + content even without file attachment context', async () => {
+test('extractItemSources: file item indexes supplemental content only when attachment context is absent', async () => {
     const sources = await extractItemSources({
         item: {
             id: 'item-file-1',
@@ -59,6 +59,6 @@ test('extractItemSources: file item also indexes title + content even without fi
     });
     assert.equal(sources.length, 1);
     assert.equal(sources[0]?.sourceType, 'text');
-    assert.match(sources[0]?.text || '', /Spec PDF/);
     assert.match(sources[0]?.text || '', /Supplement note for retrieval/);
+    assert.doesNotMatch(sources[0]?.text || '', /Spec PDF/);
 });

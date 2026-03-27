@@ -2,7 +2,7 @@ import { fetchMatrixMediaBuffer, parseDocument } from './notebookParsing.js';
 import { runImageOcr } from './ocrPipeline.js';
 import { runImageVisionCaption } from './visionPipeline.js';
 function buildInlineTextSource(item) {
-    const text = `${item.title || ''}\n${item.content_markdown || ''}`.trim();
+    const text = String(item.content_markdown || '').trim();
     if (!text)
         return null;
     return { text, sourceType: 'text', sourceLocator: null, segments: undefined };

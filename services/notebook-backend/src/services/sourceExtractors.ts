@@ -24,8 +24,8 @@ export type IndexItemFileRow = {
   is_indexable: boolean
 }
 
-function buildInlineTextSource(item: Pick<IndexItemRow, 'title' | 'content_markdown'>) {
-  const text = `${item.title || ''}\n${item.content_markdown || ''}`.trim()
+function buildInlineTextSource(item: Pick<IndexItemRow, 'content_markdown'>) {
+  const text = String(item.content_markdown || '').trim()
   if (!text) return null
   return { text, sourceType: 'text', sourceLocator: null as string | null, segments: undefined as Array<{ text: string; sourceLocator?: string }> | undefined }
 }
