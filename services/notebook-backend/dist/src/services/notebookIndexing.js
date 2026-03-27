@@ -63,6 +63,15 @@ export async function runNotebookIndexJob(jobId, options) {
                     fallbackModel: aiConfig.chatModel
                 }
             });
+            const hasFileAttachment = files.length > 0 || Boolean(item.matrix_media_mxc);
+            const hasParsedFileContent = extractedList.some((source) => {
+                if (source.sourceType === 'text')
+                    return false;
+                if (Array.isArray(source.segments) && source.segments.some((segment) => String(segment.text || '').trim().length > 0)) {
+                    return true;
+                }
+                return String(source.text || '').trim().length > 0;
+            });
             let chunkIndexOffset = 0;
             const jobChunkStrategy = (job.chunk_strategy || 'smart');
             const jobChunkSize = job.chunk_size || Number(process.env.NOTEBOOK_CHUNK_SIZE || 1000);
@@ -88,6 +97,12 @@ export async function runNotebookIndexJob(jobId, options) {
                 ...chunk,
                 chunkIndex: idx
             }));
+            if (item.item_type === 'file' && hasFileAttachment && !hasParsedFileContent) {
+                throw new Error('EMPTY_PARSED_TEXT');
+            }
+            if (chunks.length === 0) {
+                throw new Error('EMPTY_CHUNKS');
+            }
             await ensureQdrantCollection();
             await replaceItemChunks({
                 itemId: item.id,
