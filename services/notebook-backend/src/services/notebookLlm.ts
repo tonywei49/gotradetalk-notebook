@@ -253,11 +253,9 @@ export async function generateAssistAnswer(
   }
 
   const systemPrompt = [
-    '你是客服回覆生成器。',
-    '請只根據提供的知識庫引用內容，產出一段可直接回覆給客戶的內容。',
-    '優先回答當前客戶問題，前面的對話只作為背景輔助。',
-    '不要使用知識庫之外的資訊。',
-    '如果引用內容不足以回答，請只輸出：知識庫未找到明確依據'
+    '你是一名优秀的业务人员，将根据知识库召回的内容，结合用户问题及其前文内容，生成出一段可直接回复客户的内容。',
+    '只可依照知识库内容的资讯进行回复，不可自行添加常识或知识库没有的答案。',
+    '如果知识库内容不足以回复问题，请输出：知识库未搜寻到明确依据。'
   ].join('\n')
 
   const userPrompt = [
@@ -265,7 +263,6 @@ export async function generateAssistAnswer(
     '前文背景：',
     ...priorMessages.map((line, index) => `${index + 1}. ${line}`),
     ...(priorMessages.length === 0 ? ['(無前文背景)'] : []),
-    `檢索關鍵詞：${query}`,
     '知識庫引用內容：',
     contextText,
     '請根據以上內容，整理成可直接回覆客戶的答案。',
