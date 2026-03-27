@@ -88,3 +88,42 @@ test('generateAssistAnswer strips optional answer labels when present', async ()
     globalThis.fetch = originalFetch
   }
 })
+
+test('generateAssistAnswer sends concise no-greeting prompt instructions', async () => {
+  const originalFetch = globalThis.fetch
+  let requestBody: any = null
+  globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    requestBody = init?.body ? JSON.parse(String(init.body)) : null
+    return {
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: '可评估压缩到25天，但需先确认排产和物料是否到位。'
+            }
+          }
+        ]
+      })
+    } as any
+  }) as any
+
+  try {
+    await generateAssistAnswer(
+      TEST_CONFIG,
+      '如果我給30%預付款，可以做到25天嗎？',
+      [{ source: '[交期政策|S1]', text: '若支付30%预付款，可评估压缩到25天内，但需确认排产。' }],
+      'zh-CN',
+      { currentQuestion: '如果我給30%預付款，可以做到25天嗎？', priorMessages: [] }
+    )
+
+    const systemPrompt = String(requestBody?.messages?.[0]?.content || '')
+    const userPrompt = String(requestBody?.messages?.[1]?.content || '')
+    assert.match(systemPrompt, /禁止使用“你好”“您好”“谢谢”等客套开场/)
+    assert.match(systemPrompt, /尽量在5句以内把客户问题解释清楚/)
+    assert.match(userPrompt, /直接回答，不要客套開場/)
+    assert.match(userPrompt, /盡量控制在 5 句以內，把問題解釋清楚/)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
