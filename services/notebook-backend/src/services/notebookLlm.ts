@@ -245,30 +245,30 @@ export async function generateAssistAnswer(
   const languageInstruction = buildLanguageInstruction(responseLanguage || 'zh-TW')
   const currentQuestion = String(promptContext?.currentQuestion || query || '').trim()
   const priorMessages = (promptContext?.priorMessages || []).map((line) => String(line || '').trim()).filter(Boolean).slice(-5)
+  const hasAnyContext = contextBlocks.some((block) => String(block.text || '').trim().length > 0)
+
+  if (!hasAnyContext) {
+    const noEvidence = '知識庫未找到明確依據'
+    return { answer: noEvidence, summary: noEvidence, referenceAnswer: noEvidence }
+  }
 
   const systemPrompt = [
-    '你是「客服參考答案生成器」。',
-    '你只能依據提供的知識庫引用內容回答，不得使用外部常識補全、糾正或猜測。',
-    '即使引用內容與常識衝突，也必須以引用內容為準。',
-    '你要輸出的是一段可直接回覆給客戶的內容。',
-    '只輸出一行：參考答案：{內容}',
-    '優先回答「當前客戶問題」；前面5句對話只作背景輔助。',
-    '不要照抄原始引用格式，不要輸出頁碼、Markdown 標題、KPI/KDL 編號、分頁符、來源標記。',
-    '不要輸出「根據召回內容」「根據引用內容」這類開場。',
-    '若引用內容足夠，必須整理成自然、專業、可直接發送的客服回覆。',
-    '若證據不足，才可輸出：參考答案：知識庫未找到明確依據',
-    '禁止輸出 CONFIDENCE、禁止輸出額外段落、禁止空白行。'
+    '你是客服回覆生成器。',
+    '請只根據提供的知識庫引用內容，產出一段可直接回覆給客戶的內容。',
+    '優先回答當前客戶問題，前面的對話只作為背景輔助。',
+    '不要使用知識庫之外的資訊。',
+    '如果引用內容不足以回答，請只輸出：知識庫未找到明確依據'
   ].join('\n')
 
   const userPrompt = [
-    `當前客戶問題（優先級最高）：${currentQuestion || query}`,
-    '前文背景（最多5句，僅輔助理解，不一定都相關）：',
+    `當前客戶問題：${currentQuestion || query}`,
+    '前文背景：',
     ...priorMessages.map((line, index) => `${index + 1}. ${line}`),
     ...(priorMessages.length === 0 ? ['(無前文背景)'] : []),
     `檢索關鍵詞：${query}`,
-    '知識庫引用內容（最多3條）：',
-    contextText || '(無來源)',
-    '請根據以上內容，輸出一段可直接回覆客戶的參考答案。',
+    '知識庫引用內容：',
+    contextText,
+    '請根據以上內容，整理成可直接回覆客戶的答案。',
     languageInstruction
   ].join('\n')
 
@@ -303,28 +303,10 @@ export async function generateAssistAnswer(
   const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
   const referenceMatch = content.match(/參考答案\s*[:：]\s*([\s\S]*?)$/i)
   const fallbackLine = lines.find(Boolean) || '知識庫未找到明確依據'
-  let referenceAnswer = String(referenceMatch?.[1] || fallbackLine)
+  const referenceAnswer = String(referenceMatch?.[1] || fallbackLine)
     .replace(/\s+/g, ' ')
-    .replace(/(?:^|\s)(?:#{1,6}\s*Page\s+\d+|--\s*\d+\s+of\s+\d+\s*--|\[[A-Z]{2,}\d+\]|\b[Kk][Pp][Ii]\d+\b|\b[Kk][Dd][Ll]\d+\b)\s*/g, ' ')
-    .replace(/\s{2,}/g, ' ')
+    .replace(/^參考答案\s*[:：]\s*/i, '')
     .trim() || '知識庫未找到明確依據'
-
-  const noEvidencePhrase = '知識庫未找到明確依據'
-  const hasAnyContext = contextBlocks.some((block) => String(block.text || '').trim().length > 0)
-  const saysNoEvidence = referenceAnswer.includes(noEvidencePhrase)
-
-  // Guardrail: when retrieval has content, avoid contradictory "no evidence" output.
-  if (hasAnyContext && saysNoEvidence) {
-    const topBlock = contextBlocks.find((block) => String(block.text || '').trim().length > 0)
-    const topText = String(topBlock?.text || '')
-      .replace(/\s+/g, ' ')
-      .replace(/(?:^|\s)(?:#{1,6}\s*Page\s+\d+|--\s*\d+\s+of\s+\d+\s*--|\[[A-Z]{2,}\d+\]|\b[Kk][Pp][Ii]\d+\b|\b[Kk][Dd][Ll]\d+\b)\s*/g, ' ')
-      .replace(/\s{2,}/g, ' ')
-      .trim()
-    if (topText) {
-      referenceAnswer = topText
-    }
-  }
 
   const summary = referenceAnswer
   const answer = referenceAnswer
